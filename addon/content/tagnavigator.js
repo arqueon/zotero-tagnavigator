@@ -317,17 +317,17 @@ async function refreshTags() {
 
     // Consulta directa a la base de datos de Zotero usando ID numérico
     // Se cambia items.key por items.itemID para usar índices primarios en bases de datos grandes (1GB)
+    // Se remueve el filtro de libraryID para soportar bibliotecas compartidas y de grupos automáticamente
     const rows = await Zotero.DB.queryAsync(
       `
       SELECT tags.name as name, itemTags.type as type, COUNT(*) as count
       FROM tags
       JOIN itemTags USING (tagID)
       JOIN items USING (itemID)
-      WHERE items.libraryID = ? AND items.itemID NOT IN (SELECT itemID FROM deletedItems)
+      WHERE items.itemID NOT IN (SELECT itemID FROM deletedItems)
       GROUP BY tags.name, itemTags.type
       ORDER BY count DESC, tags.name ASC
     `,
-      [libraryID],
     );
 
     // Combinar duplicados si una tag aparece como manual y automática en diferentes ítems
@@ -401,20 +401,17 @@ function renderTagTree(tagsToRender = allTags) {
 // Cargar el número de ítems sin etiquetas
 async function loadUntaggedCount() {
   try {
-    const libraryID = Zotero.Libraries.userLibraryID;
     // Consulta directa optimizada para evitar instanciar todos los ítems de Zotero en memoria
     const rows = await Zotero.DB.queryAsync(
       `
       SELECT COUNT(*) as count
       FROM items
-      WHERE libraryID = ?
-        AND itemID NOT IN (SELECT itemID FROM deletedItems)
+      WHERE itemID NOT IN (SELECT itemID FROM deletedItems)
         AND itemID NOT IN (SELECT itemID FROM itemTags)
         AND itemTypeID NOT IN (
-          SELECT itemTypeID FROM itemTypes WHERE name IN ('attachment', 'note', 'annotation')
+          SELECT itemTypeID FROM itemTypes WHERE typeName IN ('attachment', 'note', 'annotation')
         )
       `,
-      [libraryID],
     );
     const count = rows?.[0]?.count || 0;
 
@@ -465,22 +462,18 @@ async function selectTag(tagName) {
     `${getUIString("msg-items-in")}${tagName}`;
 
   try {
-    const libraryID = Zotero.Libraries.userLibraryID;
-
     if (tagName === "[Untagged]") {
       // Obtener ítems sin etiquetas vía SQLite de forma directa
       const rows = await Zotero.DB.queryAsync(
         `
         SELECT itemID
         FROM items
-        WHERE libraryID = ?
-          AND itemID NOT IN (SELECT itemID FROM deletedItems)
+        WHERE itemID NOT IN (SELECT itemID FROM deletedItems)
           AND itemID NOT IN (SELECT itemID FROM itemTags)
           AND itemTypeID NOT IN (
-            SELECT itemTypeID FROM itemTypes WHERE name IN ('attachment', 'note', 'annotation')
+            SELECT itemTypeID FROM itemTypes WHERE typeName IN ('attachment', 'note', 'annotation')
           )
         `,
-        [libraryID],
       );
       const itemIDs = rows.map((r) => r.itemID);
       itemsInTag = await Zotero.Items.getAsync(itemIDs);
@@ -496,7 +489,7 @@ async function selectTag(tagName) {
           WHERE tagID = ?
             AND itemID NOT IN (SELECT itemID FROM deletedItems)
             AND itemTypeID NOT IN (
-              SELECT itemTypeID FROM itemTypes WHERE name IN ('attachment', 'note', 'annotation')
+              SELECT itemTypeID FROM itemTypes WHERE typeName IN ('attachment', 'note', 'annotation')
             )
           `,
           [tagID],
