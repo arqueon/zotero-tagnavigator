@@ -312,49 +312,40 @@ function loadCitationsStyles() {
 
 // Cargar la lista completa de tags y sus estadísticas desde SQLite
 async function refreshTags() {
-  try {
-    const libraryID = Zotero.Libraries.userLibraryID;
+  // Consulta directa a la base de datos de Zotero usando ID numérico
+  // Se cambia items.key por items.itemID para usar índices primarios en bases de datos grandes (1GB)
+  // Se remueve el filtro de libraryID para soportar bibliotecas compartidas y de grupos automáticamente
+  // Se selecciona tags.type en lugar de itemTags.type ya que la columna type pertenece a la tabla tags
+  const rows = await Zotero.DB.queryAsync(
+    `
+    SELECT tags.name as name, tags.type as type, COUNT(*) as count
+    FROM tags
+    JOIN itemTags USING (tagID)
+    JOIN items USING (itemID)
+    WHERE items.itemID NOT IN (SELECT itemID FROM deletedItems)
+    GROUP BY tags.name, tags.type
+    ORDER BY count DESC, tags.name ASC
+  `,
+  );
 
-    // Consulta directa a la base de datos de Zotero usando ID numérico
-    // Se cambia items.key por items.itemID para usar índices primarios en bases de datos grandes (1GB)
-    // Se remueve el filtro de libraryID para soportar bibliotecas compartidas y de grupos automáticamente
-    const rows = await Zotero.DB.queryAsync(
-      `
-      SELECT tags.name as name, itemTags.type as type, COUNT(*) as count
-      FROM tags
-      JOIN itemTags USING (tagID)
-      JOIN items USING (itemID)
-      WHERE items.itemID NOT IN (SELECT itemID FROM deletedItems)
-      GROUP BY tags.name, itemTags.type
-      ORDER BY count DESC, tags.name ASC
-    `,
-    );
-
-    // Combinar duplicados si una tag aparece como manual y automática en diferentes ítems
-    const merged = new Map();
-    rows.forEach((row) => {
-      const name = row.name;
-      if (merged.has(name)) {
-        const existing = merged.get(name);
-        existing.count += row.count;
-        // Si tiene algún tipo manual (0), la tratamos como manual
-        if (row.type === 0) existing.type = 0;
-      } else {
-        merged.set(name, { name: name, type: row.type, count: row.count });
-      }
-    });
-
-    allTags = Array.from(merged.values());
-    Zotero.debug(
-      `[TagNavigator UI] Recuperadas ${allTags.length} tags de la base de datos.`,
-    );
-  } catch (error) {
-    Zotero.logError(error);
-    const treeList = document.getElementById("tag-tree");
-    if (treeList) {
-      treeList.innerHTML = `<li class="tree-error" style="padding: 10px; color: var(--accent-danger);">${getUIString("msg-db-error")}</li>`;
+  // Combinar duplicados si una tag aparece como manual y automática en diferentes ítems
+  const merged = new Map();
+  rows.forEach((row) => {
+    const name = row.name;
+    if (merged.has(name)) {
+      const existing = merged.get(name);
+      existing.count += row.count;
+      // Si tiene algún tipo manual (0), la tratamos como manual
+      if (row.type === 0) existing.type = 0;
+    } else {
+      merged.set(name, { name: name, type: row.type, count: row.count });
     }
-  }
+  });
+
+  allTags = Array.from(merged.values());
+  Zotero.debug(
+    `[TagNavigator UI] Recuperadas ${allTags.length} tags de la base de datos.`,
+  );
 }
 
 // Renderizar el árbol de tags en la barra lateral
@@ -418,7 +409,13 @@ async function loadUntaggedCount() {
     const badge = document.getElementById("count-untagged");
     if (badge) badge.textContent = count;
   } catch (e) {
-    Zotero.logError(e);
+    if (Zotero && Zotero.logError) {
+      Zotero.logError(e);
+    } else {
+      console.error(e);
+    }
+    const badge = document.getElementById("count-untagged");
+    if (badge) badge.textContent = "err";
   }
 }
 
