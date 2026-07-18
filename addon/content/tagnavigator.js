@@ -326,6 +326,7 @@ async function refreshTags() {
     GROUP BY tags.name, itemTags.type
     ORDER BY count DESC, tags.name ASC
   `,
+    [],
   );
 
   // Combinar duplicados si una tag aparece como manual y automática en diferentes ítems
@@ -403,6 +404,7 @@ async function loadUntaggedCount() {
           SELECT itemTypeID FROM itemTypes WHERE typeName IN ('attachment', 'note', 'annotation')
         )
       `,
+      [],
     );
     const count = rows?.[0]?.count || 0;
 
@@ -471,6 +473,7 @@ async function selectTag(tagName) {
             SELECT itemTypeID FROM itemTypes WHERE typeName IN ('attachment', 'note', 'annotation')
           )
         `,
+        [],
       );
       const itemIDs = rows.map((r) => r.itemID);
       itemsInTag = await Zotero.Items.getAsync(itemIDs);
