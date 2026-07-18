@@ -1,7 +1,7 @@
 {
   "name": "zotero-tagnavigator",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "Advanced Tag Explorer and Quick-Tagging plugin for Zotero 7/8/9",
   "config": {
     "addonName": "Zotero TagNavigator",

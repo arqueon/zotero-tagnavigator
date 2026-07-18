@@ -1,182 +1,620 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Zotero TagNavigator</title>
-  <link rel="stylesheet" href="chrome://tagnavigator/content/tagnavigator.css">
-</head>
-<body>
-  <div class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="logo-area">
-        <span class="logo-icon">Z</span>
-        <div class="logo-text">
-          <h1>Zotero TagNavigator</h1>
-          <span class="version-tag">v1.0.0</span>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zotero — Tag Navigator</title>
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="96x96"
+      href="chrome://tagnavigator/content/icons/tag-navigator-96.png"
+    />
+    <link rel="stylesheet" href="chrome://global/skin/global.css" />
+    <link rel="stylesheet" href="chrome://zotero-platform/content/zotero.css" />
+    <link rel="stylesheet" href="chrome://zotero/skin/zotero.css" />
+    <link
+      rel="stylesheet"
+      href="chrome://tagnavigator/content/tagnavigator.css"
+    />
+  </head>
+  <body>
+    <div id="app" class="app-shell" aria-busy="true">
+      <header class="app-toolbar" aria-label="Tag Navigator">
+        <div class="app-identity">
+          <img
+            class="app-icon"
+            src="chrome://tagnavigator/content/icons/tag-navigator-32.png"
+            alt=""
+          />
+          <div class="app-title-group">
+            <strong>Tag Navigator</strong>
+            <span id="version-label" class="app-version"></span>
+          </div>
         </div>
-      </div>
-      <div class="header-actions">
-        <button id="btn-purge-auto" class="btn btn-secondary-danger" title="Borrar en lote todas las tags automáticas">
-          Purgar Tags Automáticas
+
+        <label class="library-picker" for="library-select">
+          <img
+            class="icon"
+            src="chrome://zotero/skin/16/universal/library.svg"
+            alt=""
+          />
+          <span class="visually-hidden" data-i18n="library">Library</span>
+          <select id="library-select" aria-label="Library"></select>
+        </label>
+
+        <div class="toolbar-spacer"></div>
+
+        <button
+          id="refresh-button"
+          class="icon-button"
+          type="button"
+          data-i18n-title="refresh"
+          aria-label="Refresh"
+        >
+          <img
+            class="icon"
+            src="chrome://zotero/skin/16/universal/refresh.svg"
+            alt=""
+          />
+        </button>
+        <button
+          id="inspector-toggle"
+          class="icon-button"
+          type="button"
+          data-i18n-title="toggleInspector"
+          aria-label="Toggle inspector"
+          aria-controls="inspector-pane"
+          aria-pressed="true"
+        >
+          <img
+            class="icon"
+            src="chrome://zotero/skin/16/universal/info.svg"
+            alt=""
+          />
+        </button>
+      </header>
+
+      <div id="error-banner" class="error-banner" role="alert" hidden>
+        <img
+          class="icon"
+          src="chrome://zotero/skin/16/universal/info.svg"
+          alt=""
+        />
+        <span id="error-message"></span>
+        <button id="error-retry" type="button" data-i18n="retry">Retry</button>
+        <button
+          id="error-dismiss"
+          class="icon-button compact"
+          type="button"
+          data-i18n-title="dismiss"
+          aria-label="Dismiss"
+        >
+          <img
+            class="icon"
+            src="chrome://zotero/skin/16/universal/x-8.svg"
+            alt=""
+          />
         </button>
       </div>
-    </header>
 
-    <!-- Main Content Grid -->
-    <main class="app-body">
-      
-      <!-- Panel Izquierdo: Tag Explorer -->
-      <aside class="panel tag-explorer-panel">
-        <div class="panel-header">
-          <h2>Explorador de Tags</h2>
-        </div>
-        <div class="search-box">
-          <input type="text" id="tag-search" placeholder="Buscar tags..." autocomplete="off">
-        </div>
-        <div class="filter-options">
-          <label class="toggle-control">
-            <input type="checkbox" id="hide-automatic-tags">
-            <span class="toggle-slider"></span>
-            Ocultar tags automáticas
-          </label>
-        </div>
-        <div class="tree-container">
-          <ul id="tag-tree" class="tag-tree">
-            <!-- Cargado dinámicamente -->
-            <li class="tree-loading">Cargando tags...</li>
-          </ul>
-        </div>
-      </aside>
+      <main class="workspace">
+        <aside id="tag-pane" class="tag-pane" aria-label="Tags">
+          <div class="pane-heading">
+            <h1 data-i18n="tags">Tags</h1>
+            <span id="tag-total" class="count-label">—</span>
+            <button
+              id="tag-actions-button"
+              class="icon-button compact tag-actions-button"
+              type="button"
+              data-i18n-title="tagActions"
+              aria-label="Tag actions"
+              aria-haspopup="menu"
+              disabled
+            >
+              <span aria-hidden="true">•••</span>
+            </button>
+          </div>
 
-      <!-- Panel Central: Resultados y Filtros Híbridos -->
-      <section class="panel results-panel">
-        <div class="panel-header">
-          <h2 id="results-title">Selecciona una tag para ver sus elementos</h2>
-          <span id="results-count" class="badge">0 ítems</span>
-        </div>
-        
-        <!-- Filtros Híbridos -->
-        <div class="filters-container">
-          <div class="filter-row">
-            <div class="filter-group flex-2">
-              <label for="item-search">Buscar en textos/títulos</label>
-              <input type="text" id="item-search" placeholder="Escribe para buscar..." autocomplete="off">
+          <div class="pane-controls">
+            <div class="search-control">
+              <img
+                class="icon"
+                src="chrome://zotero/skin/16/universal/magnifier.svg"
+                alt=""
+              />
+              <input
+                id="tag-search"
+                type="search"
+                autocomplete="off"
+                data-i18n-placeholder="searchTags"
+                placeholder="Search tags"
+                aria-label="Search tags"
+              />
+              <button
+                id="clear-tag-search"
+                class="clear-button"
+                type="button"
+                data-i18n-title="clearSearch"
+                aria-label="Clear search"
+                hidden
+              >
+                <img
+                  class="icon"
+                  src="chrome://zotero/skin/16/universal/x-8.svg"
+                  alt=""
+                />
+              </button>
             </div>
-            <div class="filter-group flex-1">
-              <label for="author-filter">Autor</label>
-              <select id="author-filter">
-                <option value="">Todos los autores</option>
-              </select>
+
+            <label class="check-row">
+              <input id="hide-automatic-tags" type="checkbox" />
+              <span data-i18n="hideAutomatic">Hide automatic tags</span>
+            </label>
+          </div>
+
+          <div
+            id="tag-list"
+            class="virtual-list tag-list"
+            role="listbox"
+            tabindex="0"
+            aria-label="Tags"
+          >
+            <div id="tag-spacer" class="virtual-spacer">
+              <div id="tag-window" class="virtual-window"></div>
             </div>
           </div>
-          <div class="filter-row">
-            <div class="filter-group flex-1">
-              <label for="second-tag-filter">Cruzación (2da tag)</label>
-              <select id="second-tag-filter">
-                <option value="">Cruce con tag...</option>
-              </select>
+
+          <footer class="pane-status">
+            <span id="tag-list-status" aria-live="polite"></span>
+            <span class="legend" aria-hidden="true">
+              <span class="tag-dot manual"></span>
+              <span data-i18n="manual">Manual</span>
+              <span class="tag-dot automatic"></span>
+              <span data-i18n="automatic">Automatic</span>
+            </span>
+          </footer>
+        </aside>
+
+        <section class="items-pane" aria-label="Items">
+          <div class="items-toolbar">
+            <div class="selection-heading">
+              <h1 id="results-title" data-i18n="selectTag">Select a tag</h1>
+              <span id="results-count" class="count-badge">0</span>
             </div>
-            <div class="filter-group flex-1">
-              <label>Rango de Años: <span id="year-range-display">Todos</span></label>
-              <div class="range-sliders">
-                <input type="number" id="year-min" placeholder="Min" min="1900" max="2026">
-                <span>a</span>
-                <input type="number" id="year-max" placeholder="Max" min="1900" max="2026">
+
+            <div class="item-toolbar-actions">
+              <div class="search-control item-search-control">
+                <img
+                  class="icon"
+                  src="chrome://zotero/skin/16/universal/magnifier.svg"
+                  alt=""
+                />
+                <input
+                  id="item-search"
+                  type="search"
+                  autocomplete="off"
+                  data-i18n-placeholder="searchItems"
+                  placeholder="Title, creator, abstract or CiteKey"
+                  aria-label="Search items"
+                  disabled
+                />
+                <button
+                  id="clear-item-search"
+                  class="clear-button"
+                  type="button"
+                  data-i18n-title="clearSearch"
+                  aria-label="Clear search"
+                  hidden
+                >
+                  <img
+                    class="icon"
+                    src="chrome://zotero/skin/16/universal/x-8.svg"
+                    alt=""
+                  />
+                </button>
+              </div>
+              <button
+                id="filters-toggle"
+                class="icon-button labeled"
+                type="button"
+                aria-controls="filters-bar"
+                aria-expanded="false"
+                disabled
+              >
+                <img
+                  class="icon"
+                  src="chrome://zotero/skin/16/universal/filter.svg"
+                  alt=""
+                />
+                <span data-i18n="filters">Filters</span>
+                <span id="active-filter-count" class="filter-count" hidden
+                  >0</span
+                >
+              </button>
+            </div>
+          </div>
+
+          <div id="filters-bar" class="filters-bar" hidden>
+            <label>
+              <span data-i18n="author">Author</span>
+              <select id="author-filter" disabled>
+                <option value="" data-i18n="allAuthors">All authors</option>
+              </select>
+            </label>
+            <label>
+              <span data-i18n="intersectTag">Intersect tag</span>
+              <select id="second-tag-filter" disabled>
+                <option value="" data-i18n="anyTag">Any tag</option>
+              </select>
+            </label>
+            <fieldset class="year-fieldset">
+              <legend data-i18n="yearRange">Year range</legend>
+              <input
+                id="year-min"
+                type="number"
+                inputmode="numeric"
+                data-i18n-placeholder="from"
+                placeholder="From"
+                aria-label="Minimum year"
+                disabled
+              />
+              <span aria-hidden="true">–</span>
+              <input
+                id="year-max"
+                type="number"
+                inputmode="numeric"
+                data-i18n-placeholder="to"
+                placeholder="To"
+                aria-label="Maximum year"
+                disabled
+              />
+            </fieldset>
+            <label class="check-row compact-check">
+              <input id="filter-has-pdf" type="checkbox" disabled />
+              <span data-i18n="hasPDF">Has PDF</span>
+            </label>
+            <label class="check-row compact-check">
+              <input id="filter-has-notes" type="checkbox" disabled />
+              <span data-i18n="hasNotes">Has notes</span>
+            </label>
+            <button
+              id="clear-filters"
+              class="text-button"
+              type="button"
+              disabled
+            >
+              <span data-i18n="clearFilters">Clear filters</span>
+            </button>
+          </div>
+
+          <div id="items-empty" class="empty-state">
+            <img src="chrome://zotero/skin/16/universal/tag.svg" alt="" />
+            <h2 data-i18n="chooseTagTitle">Choose a tag to begin</h2>
+            <p data-i18n="chooseTagBody">
+              Combine a tag with text, author, year, PDF, notes and another tag.
+            </p>
+          </div>
+
+          <div id="items-table" class="items-table" role="table" hidden>
+            <div class="table-header" role="row">
+              <span class="type-column" role="columnheader"></span>
+              <button
+                class="column-header title-column"
+                type="button"
+                data-sort="title"
+                role="columnheader"
+              >
+                <span data-i18n="title">Title</span>
+                <span class="sort-indicator"></span>
+              </button>
+              <button
+                class="column-header creator-column"
+                type="button"
+                data-sort="creator"
+                role="columnheader"
+              >
+                <span data-i18n="creator">Creator</span>
+                <span class="sort-indicator"></span>
+              </button>
+              <button
+                class="column-header year-column"
+                type="button"
+                data-sort="year"
+                role="columnheader"
+              >
+                <span data-i18n="year">Year</span>
+                <span class="sort-indicator"></span>
+              </button>
+              <span class="state-column" role="columnheader">
+                <span class="visually-hidden" data-i18n="filesAndNotes"
+                  >Files and notes</span
+                >
+              </span>
+            </div>
+            <div
+              id="items-list"
+              class="virtual-list items-list"
+              role="rowgroup"
+              tabindex="0"
+              aria-label="Items"
+            >
+              <div id="items-spacer" class="virtual-spacer">
+                <div id="items-window" class="virtual-window"></div>
               </div>
             </div>
-            <div class="filter-group flex-0 align-center">
-              <div class="checkbox-filters">
-                <label class="toggle-control-small">
-                  <input type="checkbox" id="filter-has-attachments">
-                  <span class="toggle-slider-small"></span>
-                  Tiene PDF
-                </label>
-                <label class="toggle-control-small">
-                  <input type="checkbox" id="filter-has-notes">
-                  <span class="toggle-slider-small"></span>
-                  Tiene Notas
-                </label>
+          </div>
+
+          <footer class="items-statusbar">
+            <span id="items-status" aria-live="polite"></span>
+            <span id="library-status"></span>
+          </footer>
+        </section>
+
+        <aside
+          id="inspector-pane"
+          class="inspector-pane"
+          aria-label="Inspector"
+        >
+          <div class="pane-heading inspector-heading">
+            <h1 data-i18n="itemDetails">Item details</h1>
+            <button
+              id="inspector-close"
+              class="icon-button compact"
+              type="button"
+              data-i18n-title="closeInspector"
+              aria-label="Close inspector"
+            >
+              <img
+                class="icon"
+                src="chrome://zotero/skin/16/universal/x-8.svg"
+                alt=""
+              />
+            </button>
+          </div>
+
+          <div id="inspector-empty" class="inspector-empty">
+            <img src="chrome://zotero/skin/16/universal/info.svg" alt="" />
+            <p data-i18n="selectItem">Select an item to inspect it.</p>
+          </div>
+
+          <div id="inspector-content" class="inspector-content" hidden>
+            <section class="item-identity">
+              <div class="item-title-row">
+                <img
+                  id="detail-type-icon"
+                  class="item-type-icon large"
+                  alt=""
+                />
+                <div>
+                  <h2 id="detail-title"></h2>
+                  <p id="detail-byline"></p>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
+              <div class="item-action-row">
+                <button id="show-in-zotero" type="button">
+                  <img
+                    class="icon"
+                    src="chrome://zotero/skin/16/universal/show-item.svg"
+                    alt=""
+                  />
+                  <span data-i18n="showInZotero">Show in Zotero</span>
+                </button>
+                <button id="open-attachment" type="button">
+                  <img
+                    class="icon"
+                    src="chrome://zotero/skin/16/universal/attachment.svg"
+                    alt=""
+                  />
+                  <span data-i18n="openFile">Open file</span>
+                </button>
+              </div>
+            </section>
 
-        <!-- Tabla de Resultados -->
-        <div class="table-container">
-          <table class="results-table">
-            <thead>
-              <tr>
-                <th style="width: 50%;">Título</th>
-                <th style="width: 25%;">Autor</th>
-                <th style="width: 10%;">Año</th>
-                <th style="width: 15%;">Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="results-list">
-              <tr>
-                <td colspan="4" class="table-empty">No hay elementos que coincidan con los filtros.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+            <details class="inspector-section" open>
+              <summary data-i18n="info">Info</summary>
+              <dl class="metadata-grid">
+                <dt data-i18n="itemType">Item type</dt>
+                <dd id="detail-item-type"></dd>
+                <dt data-i18n="date">Date</dt>
+                <dd id="detail-date"></dd>
+                <dt data-i18n="publication">Publication</dt>
+                <dd id="detail-publication"></dd>
+                <dt>DOI</dt>
+                <dd id="detail-doi"></dd>
+                <dt>CiteKey</dt>
+                <dd id="detail-citekey"></dd>
+              </dl>
+            </details>
 
-      <!-- Panel Derecho: Quick Tagging y Copiado -->
-      <aside class="panel quick-tagging-panel">
-        <div class="panel-header">
-          <h2>Etiquetado y Copiado</h2>
-        </div>
-        
-        <!-- Detalle de Selección -->
-        <div class="selected-item-container">
-          <h3>Elemento Seleccionado</h3>
-          <div id="selected-item-card" class="item-card empty">
-            Selecciona un elemento de la lista para ver sus detalles, copiar metadatos o añadir etiquetas.
-          </div>
-        </div>
+            <details class="inspector-section" open>
+              <summary>
+                <span data-i18n="tags">Tags</span>
+                <span id="detail-tag-count" class="section-count">0</span>
+              </summary>
+              <div id="detail-tags" class="tag-chip-list"></div>
+              <form id="add-tag-form" class="tag-entry-form">
+                <div class="autocomplete-control">
+                  <input
+                    id="quick-tag-add"
+                    type="text"
+                    autocomplete="off"
+                    data-i18n-placeholder="addTag"
+                    placeholder="Add tag…"
+                    aria-label="Add tag"
+                  />
+                  <div
+                    id="tag-autocomplete"
+                    class="autocomplete-menu"
+                    role="listbox"
+                    hidden
+                  ></div>
+                </div>
+                <button
+                  type="submit"
+                  data-i18n-title="addTag"
+                  aria-label="Add tag"
+                >
+                  <img
+                    class="icon"
+                    src="chrome://zotero/skin/16/universal/plus.svg"
+                    alt=""
+                  />
+                </button>
+              </form>
+              <div class="frequent-tags-block">
+                <span class="field-label" data-i18n="frequentTags"
+                  >Frequent tags</span
+                >
+                <div id="frequent-tags" class="frequent-tag-list"></div>
+              </div>
+            </details>
 
-        <!-- Copiado CSL y CiteKey -->
-        <div class="csl-copy-container disabled" id="copy-section">
-          <h3>Copiado Rápido Académico</h3>
-          <div class="filter-group">
-            <label for="csl-style">Estilo de Cita (CSL)</label>
-            <select id="csl-style">
-              <!-- Cargado dinámicamente -->
-            </select>
+            <details class="inspector-section" open>
+              <summary data-i18n="quickCopy">Quick Copy</summary>
+              <label class="stacked-field" for="citation-style">
+                <span data-i18n="citationStyle">Citation style</span>
+                <select id="citation-style"></select>
+              </label>
+              <label
+                id="zettlr-format-option"
+                class="check-row zettlr-format-option"
+                for="zettlr-citation-format"
+              >
+                <input id="zettlr-citation-format" type="checkbox" />
+                <span class="zettlr-format-copy">
+                  <span data-i18n="zettlrCitationFormat"
+                    >Zettlr citation format</span
+                  >
+                  <span id="zettlr-format-status" class="zettlr-format-status"
+                    >[@CiteKey]</span
+                  >
+                </span>
+              </label>
+              <div class="copy-actions">
+                <button id="copy-citekey" type="button">CiteKey</button>
+                <button
+                  id="copy-citation"
+                  type="button"
+                  data-i18n="copyCitation"
+                >
+                  Copy citation
+                </button>
+                <button
+                  id="copy-bibliography"
+                  type="button"
+                  data-i18n="copyBibliography"
+                >
+                  Copy bibliography
+                </button>
+              </div>
+            </details>
           </div>
-          <div class="button-grid">
-            <button id="btn-copy-citekey" class="btn btn-secondary btn-full" title="Copiar Citation Key nativa (Atajo: C)">
-              Copiar CiteKey
+        </aside>
+      </main>
+
+      <div
+        id="tag-actions-menu"
+        class="context-menu"
+        role="menu"
+        aria-label="Tag actions"
+        hidden
+      >
+        <button type="button" role="menuitem" data-tag-action="rename">
+          <span data-i18n="renameTag">Rename tag…</span>
+        </button>
+        <button type="button" role="menuitem" data-tag-action="merge">
+          <span data-i18n="mergeTag">Merge into…</span>
+        </button>
+        <span class="menu-separator" role="separator"></span>
+        <button
+          class="danger-menu-item"
+          type="button"
+          role="menuitem"
+          data-tag-action="delete"
+        >
+          <span data-i18n="deleteTag">Remove tag from library…</span>
+        </button>
+      </div>
+
+      <dialog
+        id="tag-action-dialog"
+        class="tag-action-dialog"
+        aria-labelledby="tag-action-title"
+        aria-describedby="tag-action-description"
+      >
+        <form id="tag-action-form" aria-busy="false">
+          <header class="dialog-header">
+            <h2 id="tag-action-title">Rename tag</h2>
+            <button
+              id="tag-action-close"
+              class="icon-button compact"
+              type="button"
+              data-i18n-title="dismiss"
+              aria-label="Dismiss"
+            >
+              <img
+                class="icon"
+                src="chrome://zotero/skin/16/universal/x-8.svg"
+                alt=""
+              />
             </button>
-            <button id="btn-copy-citation" class="btn btn-primary" title="Copiar cita textual para texto (e.g. (Jay, 1973))">
-              Copiar Cita
+          </header>
+          <div class="dialog-content">
+            <p id="tag-action-description"></p>
+            <label
+              id="tag-action-target-field"
+              class="stacked-dialog-field"
+              for="tag-action-target"
+            >
+              <span id="tag-action-target-label">New tag name</span>
+              <span class="autocomplete-control">
+                <input id="tag-action-target" type="text" autocomplete="off" />
+                <span
+                  id="tag-action-autocomplete"
+                  class="autocomplete-menu"
+                  role="listbox"
+                  hidden
+                ></span>
+              </span>
+            </label>
+            <p
+              id="tag-action-error"
+              class="dialog-error"
+              role="alert"
+              hidden
+            ></p>
+          </div>
+          <footer class="dialog-actions">
+            <button id="tag-action-cancel" type="button" data-i18n="cancel">
+              Cancel
             </button>
-            <button id="btn-copy-bibliography" class="btn btn-primary" title="Copiar referencia bibliográfica completa estructurada">
-              Copiar Bibliografía
+            <button
+              id="tag-action-confirm"
+              class="primary-button"
+              type="submit"
+            >
+              Rename
             </button>
-          </div>
-        </div>
+          </footer>
+        </form>
+      </dialog>
 
-        <!-- Quick Tagging -->
-        <div class="tag-input-container disabled" id="tag-input-section">
-          <h3>Asignar Etiquetas</h3>
-          <div class="search-box">
-            <input type="text" id="quick-tag-add" placeholder="Nueva tag... (Enter)" autocomplete="off">
-            <div id="autocomplete-tags-list" class="autocomplete-dropdown hidden"></div>
-          </div>
-          <div class="frequent-tags-container">
-            <h4>Tags Frecuentes (Atajo rápido)</h4>
-            <div id="frequent-tags-list" class="frequent-tags-list">
-              <!-- Asignadas dinámicamente -->
-            </div>
-          </div>
-        </div>
-      </aside>
+      <div id="loading-overlay" class="loading-overlay" role="status">
+        <span class="spinner" aria-hidden="true"></span>
+        <span data-i18n="loadingLibrary">Loading library…</span>
+      </div>
 
-    </main>
-  </div>
+      <div
+        id="toast"
+        class="toast"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
+    </div>
 
-  <script src="chrome://tagnavigator/content/tagnavigator.js"></script>
-</body>
+    <script src="chrome://tagnavigator/content/tagnavigator.js"></script>
+  </body>
 </html>
