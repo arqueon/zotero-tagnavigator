@@ -2,43 +2,9 @@
 /* global window, document, Components, setTimeout, console */
 /* eslint-disable no-unused-vars */
 
-// 1. Obtener la referencia global de Zotero de forma robusta
-const Zotero = (() => {
-  if (window.arguments && window.arguments[0] && window.arguments[0].Zotero) {
-    return window.arguments[0].Zotero;
-  }
-  if (typeof Components !== "undefined") {
-    try {
-      return Components.classes["@zotero.org/Zotero;1"].getService()
-        .wrappedJSObject;
-    } catch (e) {
-      // Ignorar error
-    }
-  }
-  if (window.opener && window.opener.Zotero) {
-    return window.opener.Zotero;
-  }
-  if (window.parent && window.parent.Zotero) {
-    return window.parent.Zotero;
-  }
-  return null;
-})();
-
-const addon = (() => {
-  if (window.arguments && window.arguments[0] && window.arguments[0].addon) {
-    return window.arguments[0].addon;
-  }
-  if (window.opener && window.opener.addon) {
-    return window.opener.addon;
-  }
-  return null;
-})();
-
-if (!Zotero) {
-  console.error(
-    "[TagNavigator] No se pudo encontrar la referencia global a Zotero.",
-  );
-}
+// 1. Referencias globales a Zotero y addon (se resuelven al inicializar)
+let Zotero = null;
+let addon = null;
 
 // 2. Variables de estado
 let allTags = []; // [{ name: string, type: number, count: number }]
@@ -171,9 +137,38 @@ function localizeUI() {
   });
 }
 
-// 3. Inicialización al cargar la ventana
-window.addEventListener("load", async () => {
+// 3. Inicialización robusta al cargar la ventana
+async function init() {
   try {
+    // Resolver referencias globales de Zotero y addon
+    if (window.arguments && window.arguments[0] && window.arguments[0].Zotero) {
+      Zotero = window.arguments[0].Zotero;
+    } else if (window.opener && window.opener.Zotero) {
+      Zotero = window.opener.Zotero;
+    } else if (window.parent && window.parent.Zotero) {
+      Zotero = window.parent.Zotero;
+    } else if (typeof Components !== "undefined") {
+      try {
+        Zotero =
+          Components.classes["@zotero.org/Zotero;1"].getService()
+            .wrappedJSObject;
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    if (window.arguments && window.arguments[0] && window.arguments[0].addon) {
+      addon = window.arguments[0].addon;
+    } else if (window.opener && window.opener.addon) {
+      addon = window.opener.addon;
+    }
+
+    if (!Zotero) {
+      throw new Error(
+        "Zotero global object not found. Ensure this window is opened within Zotero.",
+      );
+    }
+
     Zotero.debug("[TagNavigator UI] Inicializando interfaz...");
 
     // Traducir interfaz si es español
@@ -198,13 +193,26 @@ window.addEventListener("load", async () => {
     // Mostrar categoría "Sin etiquetas" por defecto o lista de tags
     filterAndRenderTags();
   } catch (error) {
-    Zotero.logError(error);
+    if (Zotero && Zotero.logError) {
+      Zotero.logError(error);
+    } else {
+      console.error(error);
+    }
     const treeList = document.getElementById("tag-tree");
     if (treeList) {
-      treeList.innerHTML = `<li class="tree-error" style="padding: 10px; color: var(--accent-danger);">Error al inicializar: ${error.message}</li>`;
+      treeList.innerHTML = `<li class="tree-error" style="padding: 10px; color: var(--accent-danger);">${getUIString("msg-init-error")}${error.message}</li>`;
     }
   }
-});
+}
+
+if (
+  document.readyState === "complete" ||
+  document.readyState === "interactive"
+) {
+  init();
+} else {
+  window.addEventListener("load", init);
+}
 
 // Configuración de escuchas de eventos de la UI
 function setupEventListeners() {

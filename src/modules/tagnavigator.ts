@@ -21,9 +21,11 @@ export class TagNavigatorManager {
         "@mozilla.org/embedcomp/window-watcher;1"
       ].getService(Components.interfaces.nsIWindowWatcher);
 
-      // Abrir la ventana HTML
+      const parentWin = Zotero.getMainWindow() || null;
+
+      // Abrir la ventana HTML pasándole la ventana principal como padre
       this.openedWindow = ww.openWindow(
-        null,
+        parentWin,
         `chrome://${config.addonRef}/content/tagnavigator.html`,
         "tagnavigator-window",
         "chrome,dialog=no,titlebar,close,resizable,centerscreen,width=1150,height=700",
