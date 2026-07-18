@@ -8,6 +8,7 @@ import {
 import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
+import { TagNavigator } from "./modules/tagnavigator";
 
 async function onStartup() {
   await Promise.all([
@@ -17,6 +18,9 @@ async function onStartup() {
   ]);
 
   initLocale();
+  
+  // Registrar el endpoint HTTP local para Wayland/Niri
+  TagNavigator.registerServerEndpoint();
 
   BasicExampleFactory.registerPrefs();
 
@@ -99,6 +103,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  // Limpiar el endpoint y cerrar ventanas abiertas
+  TagNavigator.unregisterServerEndpoint();
+
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   // Remove addon object
