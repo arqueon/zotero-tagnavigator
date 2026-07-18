@@ -8,15 +8,15 @@ async function onStartup() {
     Zotero.uiReadyPromise,
   ]);
 
-  // Registrar el endpoint HTTP local para Wayland/Niri
-  TagNavigator.registerServerEndpoint();
+  // Inicializar endpoint local, cachés y observación de cambios en Zotero
+  TagNavigator.start();
 
   // Registrar el panel de preferencias en Zotero
   Zotero.PreferencePanes.register({
     pluginID: addon.data.config.addonID,
     src: `chrome://${addon.data.config.addonRef}/content/preferences.xhtml`,
     label: "Zotero TagNavigator",
-    image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
+    image: `chrome://${addon.data.config.addonRef}/content/icons/tag-navigator-96.png`,
   });
 
   await Promise.all(
@@ -46,8 +46,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
-  // Desregistrar el endpoint local y cerrar ventanas flotantes
-  TagNavigator.unregisterServerEndpoint();
+  // Desregistrar servicios y cerrar la ventana flotante
+  TagNavigator.stop();
 
   ztoolkit.unregisterAll();
 
