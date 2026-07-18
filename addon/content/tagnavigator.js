@@ -48,10 +48,136 @@ let itemsCache = []; // Caché de ítems ligera pre-extraída para velocidad má
 let selectedItem = null; // Objeto Zotero.Item seleccionado actualmente
 let installedStyles = []; // [{ id: string, title: string }]
 
+// 3. Diccionario de localización (Inglés por defecto, Español si Zotero está en 'es')
+const LOCALE_STRINGS = {
+  es: {
+    // Estáticos HTML
+    "tag-explorer-title": "Explorador de Tags",
+    "tag-search": { placeholder: "Buscar tags..." },
+    "hide-automatic-tags-label": "Ocultar tags automáticas",
+    "tree-loading": "Cargando tags...",
+    "results-title": "Selecciona una tag para ver sus elementos",
+    "results-count": "0 ítems",
+    "item-search-label": "Buscar en textos/títulos",
+    "item-search": { placeholder: "Escribe para buscar..." },
+    "author-filter-label": "Autor",
+    "author-filter-default": "Todos los autores",
+    "second-tag-filter-label": "Cruzación (2da tag)",
+    "second-tag-filter-default": "Cruce con tag...",
+    "year-range-title": "Rango de Años: ",
+    "filter-has-attachments-label": "Tiene PDF",
+    "filter-has-notes-label": "Tiene Notas",
+    "th-type": "Tipo",
+    "th-title": "Título",
+    "th-author": "Autor",
+    "th-year": "Año",
+    "table-empty-msg": "No hay elementos que coincidan con los filtros.",
+    "right-panel-title": "Etiquetado y Copiado",
+    "selected-item-title": "Elemento Seleccionado",
+    "selected-item-card":
+      "Selecciona un elemento de la lista para ver sus detalles, copiar metadatos o añadir etiquetas.",
+    "quick-copy-title": "Copiado Rápido Académico",
+    "csl-style-label": "Estilo de Cita (CSL)",
+    "btn-copy-citekey": {
+      text: "Copiar CiteKey",
+      title: "Copiar Citation Key nativa (Atajo: C)",
+    },
+    "btn-copy-citation": {
+      text: "Copiar Cita",
+      title: "Copiar cita textual para texto (e.g. (Jay, 1973))",
+    },
+    "btn-copy-bibliography": {
+      text: "Copiar Bibliografía",
+      title: "Copiar referencia bibliográfica completa estructurada",
+    },
+    "assign-tags-title": "Asignar Etiquetas",
+    "quick-tag-add": { placeholder: "Nueva tag... (Enter)" },
+    "frequent-tags-title": "Tags Frecuentes (Atajo rápido)",
+
+    // Dinámicos (JS)
+    "tag-type-automatic": "Etiqueta automática",
+    "tag-type-manual": "Etiqueta manual",
+    "msg-items-in": "Elementos en: ",
+    "msg-items-count": " ítems",
+    "msg-untitled": "Sin título",
+    "msg-unknown-author": "Autor desconocido",
+    "msg-year-nd": "Año N/D",
+    "msg-no-citekey": "[Sin CiteKey]",
+    "msg-untagged": "[Sin etiquetas]",
+    "msg-intersect-tag": "Cruce con tag...",
+    "msg-all-authors": "Todos los autores",
+    "msg-init-error": "Error al inicializar: ",
+    "msg-db-error": "Error al cargar tags de SQLite.",
+    "msg-citekey-copied": "CiteKey copiada!",
+    "msg-citation-copied": "Cita copiada!",
+    "msg-bib-copied": "Bibliografía copiada!",
+    "msg-tag-added": "Tag agregada: ",
+    "msg-no-frequent-tags": "No hay etiquetas frecuentes.",
+    "msg-copying": "Copiando...",
+    "msg-copy-error": "Error al copiar metadatos.",
+    "msg-no-attachments": "Este ítem no tiene adjuntos.",
+    "msg-no-citation-key": "Este ítem no tiene llave de citación.",
+    "msg-save-tag-error": "Error al guardar la tag.",
+  },
+  en: {
+    "tag-type-automatic": "Automatic tag",
+    "tag-type-manual": "Manual tag",
+    "msg-items-in": "Items in: ",
+    "msg-items-count": " items",
+    "msg-untitled": "Untitled",
+    "msg-unknown-author": "Unknown Author",
+    "msg-year-nd": "Year N/D",
+    "msg-no-citekey": "[No CiteKey]",
+    "msg-untagged": "[Untagged]",
+    "msg-intersect-tag": "Intersect with tag...",
+    "msg-all-authors": "All authors",
+    "msg-init-error": "Initialization error: ",
+    "msg-db-error": "Error loading tags from SQLite.",
+    "msg-citekey-copied": "CiteKey copied!",
+    "msg-citation-copied": "Citation copied!",
+    "msg-bib-copied": "Bibliography copied!",
+    "msg-tag-added": "Tag added: ",
+    "msg-no-frequent-tags": "No frequent tags.",
+    "msg-copying": "Copying...",
+    "msg-copy-error": "Error copying metadata.",
+    "msg-no-attachments": "This item has no attachments.",
+    "msg-no-citation-key": "This item has no citation key.",
+    "msg-save-tag-error": "Error saving tag.",
+  },
+};
+
+function getUIString(key) {
+  const lang = Zotero.locale && Zotero.locale.startsWith("es") ? "es" : "en";
+  return LOCALE_STRINGS[lang]?.[key] || LOCALE_STRINGS["en"]?.[key] || key;
+}
+
+function localizeUI() {
+  const lang = Zotero.locale && Zotero.locale.startsWith("es") ? "es" : "en";
+  if (lang !== "es") return; // Natively in English in HTML
+
+  const trans = LOCALE_STRINGS.es;
+  Object.keys(trans).forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    const val = trans[id];
+    if (typeof val === "string") {
+      el.textContent = val;
+    } else if (typeof val === "object") {
+      if (val.placeholder) el.placeholder = val.placeholder;
+      if (val.text) el.textContent = val.text;
+      if (val.title) el.title = val.title;
+    }
+  });
+}
+
 // 3. Inicialización al cargar la ventana
 window.addEventListener("load", async () => {
   try {
     Zotero.debug("[TagNavigator UI] Inicializando interfaz...");
+
+    // Traducir interfaz si es español
+    localizeUI();
 
     // Obtener preferencia "enable" (Ocultar automáticas por defecto)
     const hideAutoByDefault = Zotero.Prefs.get(
@@ -216,7 +342,7 @@ async function refreshTags() {
     Zotero.logError(error);
     const treeList = document.getElementById("tag-tree");
     if (treeList) {
-      treeList.innerHTML = `<li class="tree-error" style="padding: 10px; color: var(--accent-danger);">Error al cargar tags de SQLite.</li>`;
+      treeList.innerHTML = `<li class="tree-error" style="padding: 10px; color: var(--accent-danger);">${getUIString("msg-db-error")}</li>`;
     }
   }
 }
@@ -231,7 +357,7 @@ function renderTagTree(tagsToRender = allTags) {
   untaggedNode.className = `tag-node ${currentTag === "[Untagged]" ? "active" : ""}`;
   untaggedNode.innerHTML = `
     <span class="tag-dot" style="background-color: var(--text-muted)"></span>
-    <span class="tag-name"><strong>[Sin etiquetas]</strong></span>
+    <span class="tag-name"><strong>${getUIString("msg-untagged")}</strong></span>
     <span class="tag-count" id="count-untagged">-</span>
   `;
   untaggedNode.addEventListener("click", () => selectTag("[Untagged]"));
@@ -244,7 +370,9 @@ function renderTagTree(tagsToRender = allTags) {
 
     const dotClass = tag.type === 1 ? "automatic" : "manual";
     const typeTitle =
-      tag.type === 1 ? "Etiqueta automática" : "Etiqueta manual";
+      tag.type === 1
+        ? getUIString("tag-type-automatic")
+        : getUIString("tag-type-manual");
 
     li.innerHTML = `
       <span class="tag-dot ${dotClass}" title="${typeTitle}"></span>
@@ -324,7 +452,7 @@ async function selectTag(tagName) {
   if (activeNode) activeNode.classList.add("active");
 
   document.getElementById("results-title").textContent =
-    `Elementos en: ${tagName}`;
+    `${getUIString("msg-items-in")}${tagName}`;
 
   try {
     const libraryID = Zotero.Libraries.userLibraryID;
@@ -381,7 +509,9 @@ async function selectTag(tagName) {
         .map((c) => (c.lastName + " " + c.firstName).toLowerCase())
         .join(" ");
       const firstCreatorName =
-        creators[0]?.lastName || creators[0]?.firstName || "Anon.";
+        creators[0]?.lastName ||
+        creators[0]?.firstName ||
+        getUIString("msg-unknown-author");
 
       const dateStr = item.getField("date") || "";
       const yearMatch = dateStr.match(/\d{4}/);
@@ -390,7 +520,7 @@ async function selectTag(tagName) {
       return {
         item: item,
         id: item.id,
-        title: item.getField("title") || "Sin título",
+        title: item.getField("title") || getUIString("msg-untitled"),
         abstract: item.getField("abstractNote") || "",
         creators: creatorNames,
         firstCreator: firstCreatorName,
@@ -422,8 +552,8 @@ function populateFilterOptions() {
   const prevAuthor = authorSelect.value;
   const prevTag = tagSelect.value;
 
-  authorSelect.innerHTML = '<option value="">Todos los autores</option>';
-  tagSelect.innerHTML = '<option value="">Cruce con tag...</option>';
+  authorSelect.innerHTML = `<option value="">${getUIString("msg-all-authors")}</option>`;
+  tagSelect.innerHTML = `<option value="">${getUIString("msg-intersect-tag")}</option>`;
 
   const authors = new Set();
   const secondaryTags = new Set();
@@ -534,7 +664,7 @@ function applyFilters() {
   });
 
   document.getElementById("results-count").textContent =
-    `${filtered.length} ítems`;
+    `${filtered.length}${getUIString("msg-items-count")}`;
   renderResultsTable(filtered);
 }
 
@@ -546,7 +676,7 @@ function renderResultsTable(cachedItems) {
   if (cachedItems.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="4" class="table-empty">No hay elementos que coincidan con los filtros.</td>
+        <td colspan="4" class="table-empty">${getUIString("table-empty-msg")}</td>
       </tr>
     `;
     return;
@@ -563,7 +693,9 @@ function renderResultsTable(cachedItems) {
       : "";
     const title = cached.title;
     const author = cached.firstCreator;
-    const yearDisplay = cached.year ? cached.year.toString() : "N/D";
+    const yearDisplay = cached.year
+      ? cached.year.toString()
+      : getUIString("msg-year-nd");
 
     tr.innerHTML = `
       <td>${typeLabel}</td>
@@ -604,14 +736,14 @@ function selectItem(item, rowElement) {
   const card = document.getElementById("selected-item-card");
   card.className = "item-card";
 
-  const title = item.getField("title") || "Sin título";
+  const title = item.getField("title") || getUIString("msg-untitled");
   const creators =
     item
       .getCreators()
       .map((c) => `${c.firstName} ${c.lastName}`)
-      .join(", ") || "Autor desconocido";
-  const date = item.getField("date") || "Año N/D";
-  const citeKey = item.citationKey || "[Sin CiteKey]";
+      .join(", ") || getUIString("msg-unknown-author");
+  const date = item.getField("date") || getUIString("msg-year-nd");
+  const citeKey = item.citationKey || getUIString("msg-no-citekey");
 
   let tagsBadgeHtml = item
     .getTags()
@@ -655,7 +787,7 @@ async function openItemAttachment(item) {
         mainWin.ZoteroPane.openViewerForAttachment(attachment.id);
       }
     } else {
-      showToast("Este ítem no tiene adjuntos.");
+      showToast(getUIString("msg-no-attachments"));
     }
   } catch (e) {
     Zotero.logError(e);
@@ -671,9 +803,9 @@ function copyMetadata(type) {
       const citekey = selectedItem.citationKey || "";
       if (citekey) {
         Zotero.Utilities.Internal.copyTextToClipboard(citekey);
-        showToast("CiteKey copiada!");
+        showToast(getUIString("msg-citekey-copied"));
       } else {
-        showToast("Este ítem no tiene llave de citación.");
+        showToast(getUIString("msg-no-citation-key"));
       }
     } else if (type === "citation" || type === "bibliography") {
       const styleSelect = document.getElementById("csl-style");
@@ -689,11 +821,15 @@ function copyMetadata(type) {
         asCitation,
       );
 
-      showToast(asCitation ? "Cita copiada!" : "Bibliografía copiada!");
+      showToast(
+        asCitation
+          ? getUIString("msg-citation-copied")
+          : getUIString("msg-bib-copied"),
+      );
     }
   } catch (error) {
     Zotero.logError(error);
-    showToast("Error al copiar metadatos.");
+    showToast(getUIString("msg-copy-error"));
   }
 }
 
@@ -714,10 +850,10 @@ async function handleQuickTagInput(e) {
       selectItem(selectedItem); // Actualizar tarjeta lateral
       await refreshTags(); // Recargar árbol de tags
       filterAndRenderTags();
-      showToast(`Tag agregada: ${tagName}`);
+      showToast(getUIString("msg-tag-added") + tagName);
     } catch (err) {
       Zotero.logError(err);
-      showToast("Error al guardar la tag.");
+      showToast(getUIString("msg-save-tag-error"));
     }
   }
 }
@@ -771,7 +907,7 @@ function renderFrequentTags() {
     .slice(0, 5);
 
   if (manualTags.length === 0) {
-    container.innerHTML = `<span style="font-size: 0.85em; color: var(--text-muted);">No hay etiquetas frecuentes.</span>`;
+    container.innerHTML = `<span style="font-size: 0.85em; color: var(--text-muted);">${getUIString("msg-no-frequent-tags")}</span>`;
     return;
   }
 
@@ -788,7 +924,7 @@ function renderFrequentTags() {
         selectedItem.addTag(tag.name, 0);
         await selectedItem.saveTx();
         selectItem(selectedItem);
-        showToast(`Tag agregada: ${tag.name}`);
+        showToast(getUIString("msg-tag-added") + tag.name);
       }
     });
 

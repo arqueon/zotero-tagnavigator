@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <title>Zotero TagNavigator</title>
@@ -23,16 +23,16 @@
 
       <!-- Main Content Grid -->
       <main class="app-body">
-        <!-- Panel Izquierdo: Tag Explorer -->
+        <!-- Left Panel: Tag Explorer -->
         <aside class="panel tag-explorer-panel">
           <div class="panel-header">
-            <h2>Explorador de Tags</h2>
+            <h2 id="tag-explorer-title">Tag Explorer</h2>
           </div>
           <div class="search-box">
             <input
               type="text"
               id="tag-search"
-              placeholder="Buscar tags..."
+              placeholder="Search tags..."
               autocomplete="off"
             />
           </div>
@@ -40,56 +40,63 @@
             <label class="toggle-control">
               <input type="checkbox" id="hide-automatic-tags" />
               <span class="toggle-slider"></span>
-              Ocultar tags automáticas
+              <span id="hide-automatic-tags-label">Hide automatic tags</span>
             </label>
           </div>
           <div class="tree-container">
             <ul id="tag-tree" class="tag-tree">
-              <!-- Cargado dinámicamente -->
-              <li class="tree-loading">Cargando tags...</li>
+              <!-- Loaded dynamically -->
+              <li class="tree-loading" id="tree-loading">Loading tags...</li>
             </ul>
           </div>
         </aside>
 
-        <!-- Panel Central: Resultados y Filtros Híbridos -->
+        <!-- Central Panel: Hybrid Results and Filters -->
         <section class="panel results-panel">
           <div class="panel-header">
-            <h2 id="results-title">
-              Selecciona una tag para ver sus elementos
-            </h2>
-            <span id="results-count" class="badge">0 ítems</span>
+            <h2 id="results-title">Select a tag to view its items</h2>
+            <span id="results-count" class="badge">0 items</span>
           </div>
 
-          <!-- Filtros Híbridos -->
+          <!-- Hybrid Filters -->
           <div class="filters-container">
             <div class="filter-row">
               <div class="filter-group flex-2">
-                <label for="item-search">Buscar en textos/títulos</label>
+                <label for="item-search" id="item-search-label"
+                  >Search in texts/titles</label
+                >
                 <input
                   type="text"
                   id="item-search"
-                  placeholder="Escribe para buscar..."
+                  placeholder="Type to search..."
                   autocomplete="off"
                 />
               </div>
               <div class="filter-group flex-1">
-                <label for="author-filter">Autor</label>
+                <label for="author-filter" id="author-filter-label"
+                  >Author</label
+                >
                 <select id="author-filter">
-                  <option value="">Todos los autores</option>
+                  <option value="" id="author-filter-default">
+                    All authors
+                  </option>
                 </select>
               </div>
             </div>
             <div class="filter-row">
               <div class="filter-group flex-1">
-                <label for="second-tag-filter">Cruzación (2da tag)</label>
+                <label for="second-tag-filter" id="second-tag-filter-label"
+                  >Intersection (2nd tag)</label
+                >
                 <select id="second-tag-filter">
-                  <option value="">Cruce con tag...</option>
+                  <option value="" id="second-tag-filter-default">
+                    Intersect with tag...
+                  </option>
                 </select>
               </div>
               <div class="filter-group flex-1">
-                <label
-                  >Rango de Años:
-                  <span id="year-range-display">Todos</span></label
+                <label id="year-range-title"
+                  >Year Range: <span id="year-range-display">All</span></label
                 >
                 <div class="range-sliders">
                   <input
@@ -99,7 +106,7 @@
                     min="1900"
                     max="2026"
                   />
-                  <span>a</span>
+                  <span>to</span>
                   <input
                     type="number"
                     id="year-max"
@@ -114,33 +121,33 @@
                   <label class="toggle-control-small">
                     <input type="checkbox" id="filter-has-attachments" />
                     <span class="toggle-slider-small"></span>
-                    Tiene PDF
+                    <span id="filter-has-attachments-label">Has PDF</span>
                   </label>
                   <label class="toggle-control-small">
                     <input type="checkbox" id="filter-has-notes" />
                     <span class="toggle-slider-small"></span>
-                    Tiene Notas
+                    <span id="filter-has-notes-label">Has Notes</span>
                   </label>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Tabla de Resultados -->
+          <!-- Results Table -->
           <div class="table-container">
             <table class="results-table">
               <thead>
                 <tr>
-                  <th style="width: 50%">Título</th>
-                  <th style="width: 25%">Autor</th>
-                  <th style="width: 10%">Año</th>
-                  <th style="width: 15%">Acciones</th>
+                  <th style="width: 10%" id="th-type">Type</th>
+                  <th style="width: 50%" id="th-title">Title</th>
+                  <th style="width: 25%" id="th-author">Author</th>
+                  <th style="width: 15%" id="th-year">Year</th>
                 </tr>
               </thead>
               <tbody id="results-list">
                 <tr>
-                  <td colspan="4" class="table-empty">
-                    No hay elementos que coincidan con los filtros.
+                  <td colspan="4" class="table-empty" id="table-empty-msg">
+                    No items match the filters.
                   </td>
                 </tr>
               </tbody>
@@ -148,63 +155,65 @@
           </div>
         </section>
 
-        <!-- Panel Derecho: Quick Tagging y Copiado -->
+        <!-- Right Panel: Quick Tagging and Copying -->
         <aside class="panel quick-tagging-panel">
           <div class="panel-header">
-            <h2>Etiquetado y Copiado</h2>
+            <h2 id="right-panel-title">Tagging & Copying</h2>
           </div>
 
-          <!-- Detalle de Selección -->
+          <!-- Selection Details -->
           <div class="selected-item-container">
-            <h3>Elemento Seleccionado</h3>
+            <h3 id="selected-item-title">Selected Item</h3>
             <div id="selected-item-card" class="item-card empty">
-              Selecciona un elemento de la lista para ver sus detalles, copiar
-              metadatos o añadir etiquetas.
+              Select an item from the list to view its details, copy metadata or
+              add tags.
             </div>
           </div>
 
-          <!-- Copiado CSL y CiteKey -->
+          <!-- CSL Copying and CiteKey -->
           <div class="csl-copy-container disabled" id="copy-section">
-            <h3>Copiado Rápido Académico</h3>
+            <h3 id="quick-copy-title">Quick Academic Copy</h3>
             <div class="filter-group">
-              <label for="csl-style">Estilo de Cita (CSL)</label>
+              <label for="csl-style" id="csl-style-label"
+                >Citation Style (CSL)</label
+              >
               <select id="csl-style">
-                <!-- Cargado dinámicamente -->
+                <!-- Loaded dynamically -->
               </select>
             </div>
             <div class="button-grid">
               <button
                 id="btn-copy-citekey"
                 class="btn btn-secondary btn-full"
-                title="Copiar Citation Key nativa (Atajo: C)"
+                title="Copy native Citation Key (Shortcut: C)"
               >
-                Copiar CiteKey
+                Copy CiteKey
               </button>
               <button
                 id="btn-copy-citation"
                 class="btn btn-primary"
-                title="Copiar cita textual para texto (e.g. (Jay, 1973))"
+                title="Copy in-text citation (e.g. (Jay, 1973))"
               >
-                Copiar Cita
+                Copy Citation
               </button>
               <button
                 id="btn-copy-bibliography"
                 class="btn btn-primary"
-                title="Copiar referencia bibliográfica completa estructurada"
+                title="Copy full bibliography reference"
               >
-                Copiar Bibliografía
+                Copy Bibliography
               </button>
             </div>
           </div>
 
           <!-- Quick Tagging -->
           <div class="tag-input-container disabled" id="tag-input-section">
-            <h3>Asignar Etiquetas</h3>
+            <h3 id="assign-tags-title">Assign Tags</h3>
             <div class="search-box">
               <input
                 type="text"
                 id="quick-tag-add"
-                placeholder="Nueva tag... (Enter)"
+                placeholder="New tag... (Enter)"
                 autocomplete="off"
               />
               <div
@@ -213,9 +222,9 @@
               ></div>
             </div>
             <div class="frequent-tags-container">
-              <h4>Tags Frecuentes (Atajo rápido)</h4>
+              <h4 id="frequent-tags-title">Frequent Tags (Shortcut)</h4>
               <div id="frequent-tags-list" class="frequent-tags-list">
-                <!-- Asignadas dinámicamente -->
+                <!-- Assigned dynamically -->
               </div>
             </div>
           </div>
