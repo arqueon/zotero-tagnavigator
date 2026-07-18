@@ -1,5 +1,5 @@
-pref-title = 插件模板设置示例
+pref-title = Configuración de Zotero TagNavigator
 pref-enable =
-    .label = 开启
-pref-input = 输入
-pref-help = { $name } Build { $version } { $time }
+    .label = Ocultar etiquetas automáticas por defecto
+pref-input = Atajo de Niri sugerido:
+pref-help = { $name } - Versión { $version } - Compilación: { $time }

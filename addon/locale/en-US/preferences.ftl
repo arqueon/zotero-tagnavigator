@@ -1,5 +1,5 @@
-pref-title = Addon Template Example
+pref-title = Configuración de Zotero TagNavigator
 pref-enable =
-    .label = Enable
-pref-input = Input
-pref-help = { $name } Build { $version } { $time }
+    .label = Ocultar etiquetas automáticas por defecto
+pref-input = Atajo de Niri sugerido:
+pref-help = { $name } - Versión { $version } - Compilación: { $time }

@@ -11,6 +11,14 @@ async function onStartup() {
   // Registrar el endpoint HTTP local para Wayland/Niri
   TagNavigator.registerServerEndpoint();
 
+  // Registrar el panel de preferencias en Zotero
+  Zotero.PreferencePanes.register({
+    pluginID: addon.data.config.addonID,
+    src: rootURI + "content/preferences.xhtml",
+    label: "Zotero TagNavigator",
+    image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
+  });
+
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
   );
