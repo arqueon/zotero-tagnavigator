@@ -1,2 +1,2 @@
 pref("enable", true);
-pref("input", "Mod+Shift+T");
+pref("input", "Mod+Shift+F3");
