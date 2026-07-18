@@ -1,62 +1,97 @@
 # Zotero TagNavigator
 
-**Zotero TagNavigator** es un complemento nativo para **Zotero 7, 8 y 9** diseñado como una ventana flotante ágil para explorar, buscar y gestionar etiquetas a máxima velocidad, ideal para bibliotecas con taxonomías planas y gran volumen de ítems (~28k+).
+<p align="center">
+  <img src="assets/tag-navigator-icon-master.png" alt="Zotero TagNavigator icon" width="128">
+</p>
 
----
+<p align="center">
+  A fast, Zotero-native workspace for exploring, combining, editing, and assigning tags.
+</p>
 
-## 🚀 Características Clave
+Zotero TagNavigator is an add-on for **Zotero 7, 8, and 9**. It opens in a
+separate window and follows Zotero's familiar three-pane layout: tags on the
+left, items in the center, and item details and actions on the right. It is
+designed to remain responsive with large personal and group libraries.
 
-- **Explorador de Tags (Árbol Virtual):** Navegación jerárquica con carga perezosa (_lazy-loading_) para un rendimiento instantáneo.
-- **Manuales vs. Automáticas:** Código de color (verde para manuales, naranja para automáticas). Permite filtrar las automáticas de la vista u ocultarlas, e incluye un botón para **purgarlas en lote**.
-- **Buscador Híbrido:** Caja de búsqueda de texto libre que filtra dinámicamente combinándose con las tags seleccionadas.
-- **Copiado Rápido Académico:**
-  - **CiteKey:** Copia la clave de citación nativa de Zotero 8/9 presionando la tecla **`C`** sobre el ítem seleccionado o con un clic.
-  - **Citas y Bibliografía CSL:** Copia citas textuales (ej: _(Adorno, 1973)_) o referencias completas formateadas usando estilos CSL nativos. Copia en formato **texto enriquecido (HTML/RTF)**, preservando cursivas y negritas al pegar en editores visuales.
-- **Etiquetado Rápido (Quick Tagging):** Entrada con autocompletado y atajos asignables (`Ctrl + 1` a `Ctrl + 5`) para tus 5 etiquetas manuales más frecuentes.
+## Highlights
 
----
+- **Zotero-native interface.** Uses Zotero's visual language, item icons,
+  compact controls, and light or dark theme. The inspector can collapse when
+  more space is needed.
+- **Whole-library search.** With no tag selected, search metadata, creators,
+  tags, notes, DOI, and CiteKey across the active library using Zotero's search
+  engine. Press `Ctrl+F` (or `Cmd+F` on macOS) to focus the item search from
+  anywhere in the window.
+- **Focused tag exploration.** Select a tag and refine its items by text,
+  creator, year, PDF availability, notes, or a second intersecting tag. Click
+  the active tag again, or press `Esc`, to return to whole-library search.
+- **Safe tag management.** Rename, merge, or remove a tag across a library
+  after reviewing its scope and confirming the operation. Changes use Zotero's
+  native item and transaction APIs and respect read-only group permissions.
+- **Deliberate window switching.** Selecting a result only updates the
+  inspector. Use **Open in Zotero** to reveal the item in the main library, or
+  **Open file** to launch its best attachment with Zotero's native viewer.
+- **Quick tagging.** Add tags with autocomplete, remove them from the selected
+  item, or use `Ctrl+1` through `Ctrl+5` for frequently used manual tags.
+- **Academic Quick Copy.** Copy a CiteKey, formatted citation, or bibliography
+  through Zotero's CSL and Quick Copy APIs.
+- **Zettlr-ready citations.** Enable **Zettlr citation format** next to CiteKey
+  to read Zettlr's `editor.citeStyle` setting and copy `[@key]`, `@key`, or
+  `@key []` in the format expected by Zettlr.
+- **Large-library performance.** Virtualized tag and item lists render only
+  visible rows. Global results load progressively, display up to 500 rows, and
+  preserve the full match count.
+- **Personal and group libraries.** Switch libraries from the title bar while
+  preserving each library's editing permissions.
 
-## ⌨️ Integración con Wayland / Niri (Escritorio CachyOS)
+## Installation
 
-El plugin expone un endpoint HTTP local dentro de Zotero (`http://127.0.0.1:23119/tagnavigator/open`) para poder invocar la ventana flotante desde cualquier espacio de trabajo de tu sistema operativo.
+1. Download `zotero-tag-navigator.xpi` from the
+   [latest GitHub release](https://github.com/arqueon/zotero-tagnavigator/releases/latest).
+2. In Zotero, open **Tools → Plugins**.
+3. Open the gear menu and choose **Install Plugin From File…**.
+4. Select the downloaded `.xpi` file and restart Zotero if prompted.
 
-Agrega la siguiente regla a tu archivo de configuración de Niri (`~/.config/niri/config.kdl`):
+Open TagNavigator from **Tools → Zotero TagNavigator**.
+
+## How it works
+
+TagNavigator does not open or modify `zotero.sqlite` directly. Its service
+layer performs read-only queries through `Zotero.DB`, delegates global search
+to `Zotero.Search`, and turns results into plain data for the window. All tag
+changes, attachment opening, Quick Copy operations, permissions, transactions,
+and notifications remain under Zotero's native APIs.
+
+## Wayland and Niri shortcut
+
+While Zotero is running, the add-on exposes a local endpoint at
+`http://127.0.0.1:23119/tagnavigator/open`. Calling it opens TagNavigator or
+focuses the existing window. For example, add this binding to your Niri
+configuration:
 
 ```kdl
 binds {
-    // Abre o enfoca TagNavigator desde cualquier lugar del escritorio
     Mod+Shift+F3 { spawn "curl" "-s" "http://127.0.0.1:23119/tagnavigator/open"; }
 }
 ```
 
----
+The endpoint listens only through Zotero's local connector server.
 
-## 📦 Instalación
+## Development
 
-1.  Descarga el instalador empaquetado: **`zotero-tag-navigator.xpi`** (ubicado en `.scaffold/build/` o en los [Releases de GitHub](https://github.com/arqueon/zotero-tagnavigator/releases)).
-2.  En Zotero, ve a **Herramientas > Complementos** (_Tools > Add-ons_).
-3.  Haz clic en el engranaje ⚙️ (arriba a la derecha) > **Instalar complemento desde archivo...** (_Install Add-on From File..._).
-4.  Selecciona el archivo `.xpi` y reinicia Zotero.
-
----
-
-## 🛠️ Desarrollo Local
-
-Para compilar y empaquetar cambios:
+Requirements: Node.js, npm, and a local Zotero installation.
 
 ```bash
-# Instalar dependencias
 npm install --allow-git=all
-
-# Compilar en caliente
+npm run lint:check
 npm run build
-
-# Generar empaquetado release .xpi
-npm run release
+npm test -- --no-watch
 ```
 
----
+The packaged add-on is written to
+`.scaffold/build/zotero-tag-navigator.xpi`.
 
-## 📄 Licencia
+## License
 
-Este proyecto está bajo la licencia **GNU GPL v3**. Ver el archivo `LICENSE` para más detalles.
+Zotero TagNavigator is licensed under the
+[GNU General Public License v3.0 or later](LICENSE).

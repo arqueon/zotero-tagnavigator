@@ -7,7 +7,10 @@
 declare namespace _ZoteroTypes {
   interface Prefs {
     PluginPrefsMap: {
-      "enable": boolean;
+      "hideAutomaticTags": boolean;
+      "selectedLibraryID": number;
+      "inspectorOpen": boolean;
+      "zettlrCitationFormat": boolean;
       "input": string;
     };
   }

@@ -6,8 +6,11 @@
   "homepage_url": "__homepage__",
   "author": "__author__",
   "icons": {
-    "48": "content/icons/favicon@0.5x.png",
-    "96": "content/icons/favicon.png"
+    "16": "content/icons/tag-navigator-16.png",
+    "32": "content/icons/tag-navigator-32.png",
+    "48": "content/icons/tag-navigator-48.png",
+    "96": "content/icons/tag-navigator-96.png",
+    "128": "content/icons/tag-navigator-128.png"
   },
   "applications": {
     "zotero": {

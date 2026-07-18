@@ -1,5 +1,5 @@
-pref-title = Configuración de Zotero TagNavigator
+pref-title = Zotero TagNavigator Configuration
 pref-enable =
-    .label = Ocultar etiquetas automáticas por defecto
-pref-input = Atajo de Niri sugerido:
-pref-help = { $name } - Versión { $version } - Compilación: { $time }
+    .label = Hide automatic tags by default
+pref-input = Suggested Niri shortcut:
+pref-help = { $name } - Version { $version } - Built: { $time }
