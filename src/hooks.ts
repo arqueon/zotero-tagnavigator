@@ -18,7 +18,7 @@ async function onStartup() {
   ]);
 
   initLocale();
-  
+
   // Registrar el endpoint HTTP local para Wayland/Niri
   TagNavigator.registerServerEndpoint();
 

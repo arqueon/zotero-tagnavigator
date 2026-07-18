@@ -7,21 +7,25 @@
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
-  
+
   --accent-teal: #14b8a6;
   --accent-teal-hover: #0d9488;
   --accent-amber: #f59e0b;
   --accent-amber-hover: #d97706;
-  
+
   --border-color: #334155;
   --danger-color: #ef4444;
   --danger-hover: #dc2626;
-  
+
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-  
-  --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --shadow-md:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+
+  --font-family:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
 }
 
 * {
@@ -127,7 +131,9 @@ body {
   position: relative;
 }
 
-input[type="text"], select, input[type="number"] {
+input[type="text"],
+select,
+input[type="number"] {
   width: 100%;
   padding: 10px 14px;
   background-color: var(--bg-primary);
@@ -135,10 +141,14 @@ input[type="text"], select, input[type="number"] {
   border-radius: 6px;
   color: var(--text-primary);
   font-size: 0.85rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
-input[type="text"]:focus, select:focus, input[type="number"]:focus {
+input[type="text"]:focus,
+select:focus,
+input[type="number"]:focus {
   outline: none;
   border-color: var(--accent-teal);
   box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.15);
@@ -234,9 +244,15 @@ input[type="text"]:focus, select:focus, input[type="number"]:focus {
   gap: 6px;
 }
 
-.flex-1 { flex: 1; }
-.flex-2 { flex: 2; }
-.flex-0 { flex-shrink: 0; }
+.flex-1 {
+  flex: 1;
+}
+.flex-2 {
+  flex: 2;
+}
+.flex-0 {
+  flex-shrink: 0;
+}
 
 .filter-group label {
   font-size: 0.75rem;
@@ -263,7 +279,8 @@ input[type="text"]:focus, select:focus, input[type="number"]:focus {
 }
 
 /* Toggle Controls */
-.toggle-control, .toggle-control-small {
+.toggle-control,
+.toggle-control-small {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -273,11 +290,13 @@ input[type="text"]:focus, select:focus, input[type="number"]:focus {
   user-select: none;
 }
 
-.toggle-control input, .toggle-control-small input {
+.toggle-control input,
+.toggle-control-small input {
   display: none;
 }
 
-.toggle-slider, .toggle-slider-small {
+.toggle-slider,
+.toggle-slider-small {
   position: relative;
   display: inline-block;
   width: 34px;
@@ -285,10 +304,13 @@ input[type="text"]:focus, select:focus, input[type="number"]:focus {
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 20px;
-  transition: background-color 0.2s, border-color 0.2s;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
 }
 
-.toggle-slider::after, .toggle-slider-small::after {
+.toggle-slider::after,
+.toggle-slider-small::after {
   content: "";
   position: absolute;
   width: 14px;
@@ -297,7 +319,9 @@ input[type="text"]:focus, select:focus, input[type="number"]:focus {
   background-color: var(--text-secondary);
   top: 2px;
   left: 2px;
-  transition: transform 0.2s, background-color 0.2s;
+  transition:
+    transform 0.2s,
+    background-color 0.2s;
 }
 
 .toggle-control input:checked + .toggle-slider,
@@ -409,7 +433,9 @@ input[type="text"]:focus, select:focus, input[type="number"]:focus {
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s, border-color 0.2s;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
   border: 1px solid transparent;
 }
 
@@ -472,12 +498,16 @@ input[type="text"]:focus, select:focus, input[type="number"]:focus {
   background-color: var(--bg-secondary);
 }
 
-.selected-item-container, .csl-copy-container, .tag-input-container {
+.selected-item-container,
+.csl-copy-container,
+.tag-input-container {
   padding: 20px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.selected-item-container h3, .csl-copy-container h3, .tag-input-container h3 {
+.selected-item-container h3,
+.csl-copy-container h3,
+.tag-input-container h3 {
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary);
@@ -600,7 +630,9 @@ input[type="text"]:focus, select:focus, input[type="number"]:focus {
   padding: 4px 8px;
   border-radius: 4px;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
+  transition:
+    border-color 0.2s,
+    color 0.2s;
 }
 
 .btn-tag-shortcut:hover {

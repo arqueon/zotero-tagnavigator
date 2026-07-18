@@ -17,8 +17,9 @@ export class TagNavigatorManager {
       }
 
       // Obtener el WindowWatcher de Firefox/XPCOM
-      const ww = (Components.classes as any)["@mozilla.org/embedcomp/window-watcher;1"]
-        .getService(Components.interfaces.nsIWindowWatcher);
+      const ww = (Components.classes as any)[
+        "@mozilla.org/embedcomp/window-watcher;1"
+      ].getService(Components.interfaces.nsIWindowWatcher);
 
       // Abrir la ventana HTML
       this.openedWindow = ww.openWindow(
@@ -26,7 +27,7 @@ export class TagNavigatorManager {
         `chrome://${config.addonRef}/content/tagnavigator.html`,
         "tagnavigator-window",
         "chrome,dialog=no,titlebar,close,resizable,centerscreen,width=1150,height=700",
-        { Zotero, addon: (globalThis as any).addon }
+        { Zotero, addon: (globalThis as any).addon },
       );
 
       Zotero.debug("[TagNavigator] Ventana instanciada con éxito.");
@@ -48,21 +49,23 @@ export class TagNavigatorManager {
         return;
       }
 
-      const manager = this;
-
       Zotero.Server.Endpoints["/tagnavigator/open"] = class {
         init(options: any) {
-          Zotero.debug("[TagNavigator] Petición HTTP recibida en /tagnavigator/open");
-          
+          Zotero.debug(
+            "[TagNavigator] Petición HTTP recibida en /tagnavigator/open",
+          );
+
           // Abre/enfoca la ventana
-          manager.openWindow();
+          TagNavigator.openWindow();
 
           // Retorna respuesta OK
           return [200, "text/plain", "OK"];
         }
       };
 
-      Zotero.debug("[TagNavigator] Endpoint registrado exitosamente en Zotero.Server");
+      Zotero.debug(
+        "[TagNavigator] Endpoint registrado exitosamente en Zotero.Server",
+      );
     } catch (error) {
       Zotero.logError(error as any);
     }

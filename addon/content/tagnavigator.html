@@ -1,182 +1,237 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Zotero TagNavigator</title>
-  <link rel="stylesheet" href="chrome://tagnavigator/content/tagnavigator.css">
-</head>
-<body>
-  <div class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="logo-area">
-        <span class="logo-icon">Z</span>
-        <div class="logo-text">
-          <h1>Zotero TagNavigator</h1>
-          <span class="version-tag">v1.0.0</span>
-        </div>
-      </div>
-      <div class="header-actions">
-        <button id="btn-purge-auto" class="btn btn-secondary-danger" title="Borrar en lote todas las tags automáticas">
-          Purgar Tags Automáticas
-        </button>
-      </div>
-    </header>
-
-    <!-- Main Content Grid -->
-    <main class="app-body">
-      
-      <!-- Panel Izquierdo: Tag Explorer -->
-      <aside class="panel tag-explorer-panel">
-        <div class="panel-header">
-          <h2>Explorador de Tags</h2>
-        </div>
-        <div class="search-box">
-          <input type="text" id="tag-search" placeholder="Buscar tags..." autocomplete="off">
-        </div>
-        <div class="filter-options">
-          <label class="toggle-control">
-            <input type="checkbox" id="hide-automatic-tags">
-            <span class="toggle-slider"></span>
-            Ocultar tags automáticas
-          </label>
-        </div>
-        <div class="tree-container">
-          <ul id="tag-tree" class="tag-tree">
-            <!-- Cargado dinámicamente -->
-            <li class="tree-loading">Cargando tags...</li>
-          </ul>
-        </div>
-      </aside>
-
-      <!-- Panel Central: Resultados y Filtros Híbridos -->
-      <section class="panel results-panel">
-        <div class="panel-header">
-          <h2 id="results-title">Selecciona una tag para ver sus elementos</h2>
-          <span id="results-count" class="badge">0 ítems</span>
-        </div>
-        
-        <!-- Filtros Híbridos -->
-        <div class="filters-container">
-          <div class="filter-row">
-            <div class="filter-group flex-2">
-              <label for="item-search">Buscar en textos/títulos</label>
-              <input type="text" id="item-search" placeholder="Escribe para buscar..." autocomplete="off">
-            </div>
-            <div class="filter-group flex-1">
-              <label for="author-filter">Autor</label>
-              <select id="author-filter">
-                <option value="">Todos los autores</option>
-              </select>
-            </div>
-          </div>
-          <div class="filter-row">
-            <div class="filter-group flex-1">
-              <label for="second-tag-filter">Cruzación (2da tag)</label>
-              <select id="second-tag-filter">
-                <option value="">Cruce con tag...</option>
-              </select>
-            </div>
-            <div class="filter-group flex-1">
-              <label>Rango de Años: <span id="year-range-display">Todos</span></label>
-              <div class="range-sliders">
-                <input type="number" id="year-min" placeholder="Min" min="1900" max="2026">
-                <span>a</span>
-                <input type="number" id="year-max" placeholder="Max" min="1900" max="2026">
-              </div>
-            </div>
-            <div class="filter-group flex-0 align-center">
-              <div class="checkbox-filters">
-                <label class="toggle-control-small">
-                  <input type="checkbox" id="filter-has-attachments">
-                  <span class="toggle-slider-small"></span>
-                  Tiene PDF
-                </label>
-                <label class="toggle-control-small">
-                  <input type="checkbox" id="filter-has-notes">
-                  <span class="toggle-slider-small"></span>
-                  Tiene Notas
-                </label>
-              </div>
-            </div>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Zotero TagNavigator</title>
+    <link
+      rel="stylesheet"
+      href="chrome://tagnavigator/content/tagnavigator.css"
+    />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Header -->
+      <header class="app-header">
+        <div class="logo-area">
+          <span class="logo-icon">Z</span>
+          <div class="logo-text">
+            <h1>Zotero TagNavigator</h1>
+            <span class="version-tag">v1.0.0</span>
           </div>
         </div>
-
-        <!-- Tabla de Resultados -->
-        <div class="table-container">
-          <table class="results-table">
-            <thead>
-              <tr>
-                <th style="width: 50%;">Título</th>
-                <th style="width: 25%;">Autor</th>
-                <th style="width: 10%;">Año</th>
-                <th style="width: 15%;">Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="results-list">
-              <tr>
-                <td colspan="4" class="table-empty">No hay elementos que coincidan con los filtros.</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="header-actions">
+          <button
+            id="btn-purge-auto"
+            class="btn btn-secondary-danger"
+            title="Borrar en lote todas las tags automáticas"
+          >
+            Purgar Tags Automáticas
+          </button>
         </div>
-      </section>
+      </header>
 
-      <!-- Panel Derecho: Quick Tagging y Copiado -->
-      <aside class="panel quick-tagging-panel">
-        <div class="panel-header">
-          <h2>Etiquetado y Copiado</h2>
-        </div>
-        
-        <!-- Detalle de Selección -->
-        <div class="selected-item-container">
-          <h3>Elemento Seleccionado</h3>
-          <div id="selected-item-card" class="item-card empty">
-            Selecciona un elemento de la lista para ver sus detalles, copiar metadatos o añadir etiquetas.
+      <!-- Main Content Grid -->
+      <main class="app-body">
+        <!-- Panel Izquierdo: Tag Explorer -->
+        <aside class="panel tag-explorer-panel">
+          <div class="panel-header">
+            <h2>Explorador de Tags</h2>
           </div>
-        </div>
-
-        <!-- Copiado CSL y CiteKey -->
-        <div class="csl-copy-container disabled" id="copy-section">
-          <h3>Copiado Rápido Académico</h3>
-          <div class="filter-group">
-            <label for="csl-style">Estilo de Cita (CSL)</label>
-            <select id="csl-style">
-              <!-- Cargado dinámicamente -->
-            </select>
-          </div>
-          <div class="button-grid">
-            <button id="btn-copy-citekey" class="btn btn-secondary btn-full" title="Copiar Citation Key nativa (Atajo: C)">
-              Copiar CiteKey
-            </button>
-            <button id="btn-copy-citation" class="btn btn-primary" title="Copiar cita textual para texto (e.g. (Jay, 1973))">
-              Copiar Cita
-            </button>
-            <button id="btn-copy-bibliography" class="btn btn-primary" title="Copiar referencia bibliográfica completa estructurada">
-              Copiar Bibliografía
-            </button>
-          </div>
-        </div>
-
-        <!-- Quick Tagging -->
-        <div class="tag-input-container disabled" id="tag-input-section">
-          <h3>Asignar Etiquetas</h3>
           <div class="search-box">
-            <input type="text" id="quick-tag-add" placeholder="Nueva tag... (Enter)" autocomplete="off">
-            <div id="autocomplete-tags-list" class="autocomplete-dropdown hidden"></div>
+            <input
+              type="text"
+              id="tag-search"
+              placeholder="Buscar tags..."
+              autocomplete="off"
+            />
           </div>
-          <div class="frequent-tags-container">
-            <h4>Tags Frecuentes (Atajo rápido)</h4>
-            <div id="frequent-tags-list" class="frequent-tags-list">
-              <!-- Asignadas dinámicamente -->
+          <div class="filter-options">
+            <label class="toggle-control">
+              <input type="checkbox" id="hide-automatic-tags" />
+              <span class="toggle-slider"></span>
+              Ocultar tags automáticas
+            </label>
+          </div>
+          <div class="tree-container">
+            <ul id="tag-tree" class="tag-tree">
+              <!-- Cargado dinámicamente -->
+              <li class="tree-loading">Cargando tags...</li>
+            </ul>
+          </div>
+        </aside>
+
+        <!-- Panel Central: Resultados y Filtros Híbridos -->
+        <section class="panel results-panel">
+          <div class="panel-header">
+            <h2 id="results-title">
+              Selecciona una tag para ver sus elementos
+            </h2>
+            <span id="results-count" class="badge">0 ítems</span>
+          </div>
+
+          <!-- Filtros Híbridos -->
+          <div class="filters-container">
+            <div class="filter-row">
+              <div class="filter-group flex-2">
+                <label for="item-search">Buscar en textos/títulos</label>
+                <input
+                  type="text"
+                  id="item-search"
+                  placeholder="Escribe para buscar..."
+                  autocomplete="off"
+                />
+              </div>
+              <div class="filter-group flex-1">
+                <label for="author-filter">Autor</label>
+                <select id="author-filter">
+                  <option value="">Todos los autores</option>
+                </select>
+              </div>
+            </div>
+            <div class="filter-row">
+              <div class="filter-group flex-1">
+                <label for="second-tag-filter">Cruzación (2da tag)</label>
+                <select id="second-tag-filter">
+                  <option value="">Cruce con tag...</option>
+                </select>
+              </div>
+              <div class="filter-group flex-1">
+                <label
+                  >Rango de Años:
+                  <span id="year-range-display">Todos</span></label
+                >
+                <div class="range-sliders">
+                  <input
+                    type="number"
+                    id="year-min"
+                    placeholder="Min"
+                    min="1900"
+                    max="2026"
+                  />
+                  <span>a</span>
+                  <input
+                    type="number"
+                    id="year-max"
+                    placeholder="Max"
+                    min="1900"
+                    max="2026"
+                  />
+                </div>
+              </div>
+              <div class="filter-group flex-0 align-center">
+                <div class="checkbox-filters">
+                  <label class="toggle-control-small">
+                    <input type="checkbox" id="filter-has-attachments" />
+                    <span class="toggle-slider-small"></span>
+                    Tiene PDF
+                  </label>
+                  <label class="toggle-control-small">
+                    <input type="checkbox" id="filter-has-notes" />
+                    <span class="toggle-slider-small"></span>
+                    Tiene Notas
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
 
-    </main>
-  </div>
+          <!-- Tabla de Resultados -->
+          <div class="table-container">
+            <table class="results-table">
+              <thead>
+                <tr>
+                  <th style="width: 50%">Título</th>
+                  <th style="width: 25%">Autor</th>
+                  <th style="width: 10%">Año</th>
+                  <th style="width: 15%">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="results-list">
+                <tr>
+                  <td colspan="4" class="table-empty">
+                    No hay elementos que coincidan con los filtros.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
 
-  <script src="chrome://tagnavigator/content/tagnavigator.js"></script>
-</body>
+        <!-- Panel Derecho: Quick Tagging y Copiado -->
+        <aside class="panel quick-tagging-panel">
+          <div class="panel-header">
+            <h2>Etiquetado y Copiado</h2>
+          </div>
+
+          <!-- Detalle de Selección -->
+          <div class="selected-item-container">
+            <h3>Elemento Seleccionado</h3>
+            <div id="selected-item-card" class="item-card empty">
+              Selecciona un elemento de la lista para ver sus detalles, copiar
+              metadatos o añadir etiquetas.
+            </div>
+          </div>
+
+          <!-- Copiado CSL y CiteKey -->
+          <div class="csl-copy-container disabled" id="copy-section">
+            <h3>Copiado Rápido Académico</h3>
+            <div class="filter-group">
+              <label for="csl-style">Estilo de Cita (CSL)</label>
+              <select id="csl-style">
+                <!-- Cargado dinámicamente -->
+              </select>
+            </div>
+            <div class="button-grid">
+              <button
+                id="btn-copy-citekey"
+                class="btn btn-secondary btn-full"
+                title="Copiar Citation Key nativa (Atajo: C)"
+              >
+                Copiar CiteKey
+              </button>
+              <button
+                id="btn-copy-citation"
+                class="btn btn-primary"
+                title="Copiar cita textual para texto (e.g. (Jay, 1973))"
+              >
+                Copiar Cita
+              </button>
+              <button
+                id="btn-copy-bibliography"
+                class="btn btn-primary"
+                title="Copiar referencia bibliográfica completa estructurada"
+              >
+                Copiar Bibliografía
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Tagging -->
+          <div class="tag-input-container disabled" id="tag-input-section">
+            <h3>Asignar Etiquetas</h3>
+            <div class="search-box">
+              <input
+                type="text"
+                id="quick-tag-add"
+                placeholder="Nueva tag... (Enter)"
+                autocomplete="off"
+              />
+              <div
+                id="autocomplete-tags-list"
+                class="autocomplete-dropdown hidden"
+              ></div>
+            </div>
+            <div class="frequent-tags-container">
+              <h4>Tags Frecuentes (Atajo rápido)</h4>
+              <div id="frequent-tags-list" class="frequent-tags-list">
+                <!-- Asignadas dinámicamente -->
+              </div>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="chrome://tagnavigator/content/tagnavigator.js"></script>
+  </body>
 </html>
