@@ -113,12 +113,14 @@ const LOCALE_STRINGS = {
 };
 
 function getUIString(key) {
-  const lang = Zotero.locale && Zotero.locale.startsWith("es") ? "es" : "en";
+  const lang =
+    Zotero && Zotero.locale && Zotero.locale.startsWith("es") ? "es" : "en";
   return LOCALE_STRINGS[lang]?.[key] || LOCALE_STRINGS["en"]?.[key] || key;
 }
 
 function localizeUI() {
-  const lang = Zotero.locale && Zotero.locale.startsWith("es") ? "es" : "en";
+  const lang =
+    Zotero && Zotero.locale && Zotero.locale.startsWith("es") ? "es" : "en";
   if (lang !== "es") return; // Natively in English in HTML
 
   const trans = LOCALE_STRINGS.es;
