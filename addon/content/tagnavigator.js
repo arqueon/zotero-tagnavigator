@@ -1,18 +1,50 @@
 // Zotero TagNavigator - Frontend Script
-/* global window, document, Components, confirm, setTimeout */
+/* global window, document, Components, setTimeout, console */
 /* eslint-disable no-unused-vars */
 
-// 1. Obtener la referencia global de Zotero
-const Zotero =
-  window.arguments?.[0]?.Zotero ||
-  Components.classes["@zotero.org/Zotero;1"].getService().wrappedJSObject;
+// 1. Obtener la referencia global de Zotero de forma robusta
+const Zotero = (() => {
+  if (window.arguments && window.arguments[0] && window.arguments[0].Zotero) {
+    return window.arguments[0].Zotero;
+  }
+  if (typeof Components !== "undefined") {
+    try {
+      return Components.classes["@zotero.org/Zotero;1"].getService()
+        .wrappedJSObject;
+    } catch (e) {
+      // Ignorar error
+    }
+  }
+  if (window.opener && window.opener.Zotero) {
+    return window.opener.Zotero;
+  }
+  if (window.parent && window.parent.Zotero) {
+    return window.parent.Zotero;
+  }
+  return null;
+})();
 
-const addon = window.arguments?.[0]?.addon;
+const addon = (() => {
+  if (window.arguments && window.arguments[0] && window.arguments[0].addon) {
+    return window.arguments[0].addon;
+  }
+  if (window.opener && window.opener.addon) {
+    return window.opener.addon;
+  }
+  return null;
+})();
+
+if (!Zotero) {
+  console.error(
+    "[TagNavigator] No se pudo encontrar la referencia global a Zotero.",
+  );
+}
 
 // 2. Variables de estado
 let allTags = []; // [{ name: string, type: number, count: number }]
 let currentTag = null; // Nombre de la tag seleccionada actualmente
 let itemsInTag = []; // Objetos Zotero.Item originales de la tag actual
+let itemsCache = []; // Caché de ítems ligera pre-extraída para velocidad máxima
 let selectedItem = null; // Objeto Zotero.Item seleccionado actualmente
 let installedStyles = []; // [{ id: string, title: string }]
 
@@ -20,6 +52,13 @@ let installedStyles = []; // [{ id: string, title: string }]
 window.addEventListener("load", async () => {
   try {
     Zotero.debug("[TagNavigator UI] Inicializando interfaz...");
+
+    // Obtener preferencia "enable" (Ocultar automáticas por defecto)
+    const hideAutoByDefault = Zotero.Prefs.get(
+      "extensions.zotero.tagnavigator.enable",
+      true,
+    );
+    document.getElementById("hide-automatic-tags").checked = hideAutoByDefault;
 
     // Configurar manejadores de eventos
     setupEventListeners();
@@ -31,9 +70,13 @@ window.addEventListener("load", async () => {
     await refreshTags();
 
     // Mostrar categoría "Sin etiquetas" por defecto o lista de tags
-    renderTagTree();
+    filterAndRenderTags();
   } catch (error) {
     Zotero.logError(error);
+    const treeList = document.getElementById("tag-tree");
+    if (treeList) {
+      treeList.innerHTML = `<li class="tree-error" style="padding: 10px; color: var(--accent-danger);">Error al inicializar: ${error.message}</li>`;
+    }
   }
 });
 
@@ -71,11 +114,6 @@ function setupEventListeners() {
   document
     .getElementById("filter-has-notes")
     .addEventListener("change", applyFilters);
-
-  // Botón de purgar automáticas
-  document
-    .getElementById("btn-purge-auto")
-    .addEventListener("click", purgeAutomaticTags);
 
   // Botones de copiado
   document
@@ -141,14 +179,15 @@ async function refreshTags() {
   try {
     const libraryID = Zotero.Libraries.userLibraryID;
 
-    // Consulta directa a la base de datos de Zotero (muy rápida)
+    // Consulta directa a la base de datos de Zotero usando ID numérico
+    // Se cambia items.key por items.itemID para usar índices primarios en bases de datos grandes (1GB)
     const rows = await Zotero.DB.queryAsync(
       `
       SELECT tags.name as name, itemTags.type as type, COUNT(*) as count
       FROM tags
       JOIN itemTags USING (tagID)
       JOIN items USING (itemID)
-      WHERE items.libraryID = ? AND items.key NOT IN (SELECT key FROM deletedItems)
+      WHERE items.libraryID = ? AND items.itemID NOT IN (SELECT itemID FROM deletedItems)
       GROUP BY tags.name, itemTags.type
       ORDER BY count DESC, tags.name ASC
     `,
@@ -175,6 +214,10 @@ async function refreshTags() {
     );
   } catch (error) {
     Zotero.logError(error);
+    const treeList = document.getElementById("tag-tree");
+    if (treeList) {
+      treeList.innerHTML = `<li class="tree-error" style="padding: 10px; color: var(--accent-danger);">Error al cargar tags de SQLite.</li>`;
+    }
   }
 }
 
@@ -221,10 +264,21 @@ function renderTagTree(tagsToRender = allTags) {
 async function loadUntaggedCount() {
   try {
     const libraryID = Zotero.Libraries.userLibraryID;
-    const items = await Zotero.Items.getAll(libraryID, false, false, false);
-    const count = items.filter(
-      (item) => item.isRegularItem() && item.getTags().length === 0,
-    ).length;
+    // Consulta directa optimizada para evitar instanciar todos los ítems de Zotero en memoria
+    const rows = await Zotero.DB.queryAsync(
+      `
+      SELECT COUNT(*) as count
+      FROM items
+      WHERE libraryID = ?
+        AND itemID NOT IN (SELECT itemID FROM deletedItems)
+        AND itemID NOT IN (SELECT itemID FROM itemTags)
+        AND itemTypeID NOT IN (
+          SELECT itemTypeID FROM itemTypes WHERE name IN ('attachment', 'note', 'annotation')
+        )
+      `,
+      [libraryID],
+    );
+    const count = rows?.[0]?.count || 0;
 
     const badge = document.getElementById("count-untagged");
     if (badge) badge.textContent = count;
@@ -276,23 +330,41 @@ async function selectTag(tagName) {
     const libraryID = Zotero.Libraries.userLibraryID;
 
     if (tagName === "[Untagged]") {
-      // Cargar ítems sin etiquetas
-      const allItems = await Zotero.Items.getAll(
-        libraryID,
-        false,
-        false,
-        false,
+      // Obtener ítems sin etiquetas vía SQLite de forma directa
+      const rows = await Zotero.DB.queryAsync(
+        `
+        SELECT itemID
+        FROM items
+        WHERE libraryID = ?
+          AND itemID NOT IN (SELECT itemID FROM deletedItems)
+          AND itemID NOT IN (SELECT itemID FROM itemTags)
+          AND itemTypeID NOT IN (
+            SELECT itemTypeID FROM itemTypes WHERE name IN ('attachment', 'note', 'annotation')
+          )
+        `,
+        [libraryID],
       );
-      itemsInTag = allItems.filter(
-        (item) => item.isRegularItem() && item.getTags().length === 0,
-      );
+      const itemIDs = rows.map((r) => r.itemID);
+      itemsInTag = await Zotero.Items.getAsync(itemIDs);
     } else {
-      // Cargar ítems asociados a la tag
+      // Obtener IDs de ítems asociados a la tag filtrando no regulares vía SQL
       const tagID = Zotero.Tags.getID(tagName);
       if (tagID) {
-        const itemIDs = await Zotero.Tags.getItemIDsForTag(tagID);
-        const rawItems = await Zotero.Items.getAsync(itemIDs);
-        itemsInTag = rawItems.filter((item) => item.isRegularItem());
+        const rows = await Zotero.DB.queryAsync(
+          `
+          SELECT itemID
+          FROM itemTags
+          JOIN items USING (itemID)
+          WHERE tagID = ?
+            AND itemID NOT IN (SELECT itemID FROM deletedItems)
+            AND itemTypeID NOT IN (
+              SELECT itemTypeID FROM itemTypes WHERE name IN ('attachment', 'note', 'annotation')
+            )
+          `,
+          [tagID],
+        );
+        const itemIDs = rows.map((r) => r.itemID);
+        itemsInTag = await Zotero.Items.getAsync(itemIDs);
       } else {
         itemsInTag = [];
       }
@@ -302,7 +374,37 @@ async function selectTag(tagName) {
       `[TagNavigator UI] Cargados ${itemsInTag.length} elementos bajo la tag: ${tagName}`,
     );
 
-    // Llenar selectores de filtros basados en la nueva lista de elementos
+    // Crear la caché ligera de los ítems de esta etiqueta para velocidad extrema al filtrar
+    itemsCache = itemsInTag.map((item) => {
+      const creators = item.getCreators();
+      const creatorNames = creators
+        .map((c) => (c.lastName + " " + c.firstName).toLowerCase())
+        .join(" ");
+      const firstCreatorName =
+        creators[0]?.lastName || creators[0]?.firstName || "Anon.";
+
+      const dateStr = item.getField("date") || "";
+      const yearMatch = dateStr.match(/\d{4}/);
+      const year = yearMatch ? parseInt(yearMatch[0]) : null;
+
+      return {
+        item: item,
+        id: item.id,
+        title: item.getField("title") || "Sin título",
+        abstract: item.getField("abstractNote") || "",
+        creators: creatorNames,
+        firstCreator: firstCreatorName,
+        citekey: item.citationKey || "",
+        year: year,
+        date: dateStr,
+        itemType: item.itemType || "",
+        tags: item.getTags().map((t) => t.tag),
+        attachmentsCount: item.getAttachments().length,
+        notesCount: item.getNotes().length,
+      };
+    });
+
+    // Llenar selectores de filtros basados en la nueva lista de elementos de forma directa
     populateFilterOptions();
 
     // Aplicar filtros y renderizar tabla
@@ -317,23 +419,27 @@ function populateFilterOptions() {
   const authorSelect = document.getElementById("author-filter");
   const tagSelect = document.getElementById("second-tag-filter");
 
+  const prevAuthor = authorSelect.value;
+  const prevTag = tagSelect.value;
+
   authorSelect.innerHTML = '<option value="">Todos los autores</option>';
   tagSelect.innerHTML = '<option value="">Cruce con tag...</option>';
 
   const authors = new Set();
   const secondaryTags = new Set();
 
-  itemsInTag.forEach((item) => {
-    // Autores
-    item.getCreators().forEach((c) => {
+  itemsCache.forEach((cached) => {
+    // Autores desde la caché
+    const creators = cached.item.getCreators();
+    creators.forEach((c) => {
       const name = c.lastName || c.firstName;
       if (name) authors.add(name);
     });
 
     // Tags secundarias (excluyendo la tag actual)
-    item.getTags().forEach((t) => {
-      if (t.tag !== currentTag) {
-        secondaryTags.add(t.tag);
+    cached.tags.forEach((t) => {
+      if (t !== currentTag) {
+        secondaryTags.add(t);
       }
     });
   });
@@ -345,6 +451,7 @@ function populateFilterOptions() {
       const opt = document.createElement("option");
       opt.value = author;
       opt.textContent = author;
+      if (author === prevAuthor) opt.selected = true;
       authorSelect.appendChild(opt);
     });
 
@@ -355,6 +462,7 @@ function populateFilterOptions() {
       const opt = document.createElement("option");
       opt.value = tag;
       opt.textContent = tag;
+      if (tag === prevTag) opt.selected = true;
       tagSelect.appendChild(opt);
     });
 }
@@ -378,63 +486,47 @@ function applyFilters() {
   ).checked;
   const hasNotes = document.getElementById("filter-has-notes").checked;
 
-  // Filtrar en memoria para velocidad máxima
-  const filteredItems = itemsInTag.filter((item) => {
-    // 1. Filtro de Texto libre
+  // Filtrar usando la caché en memoria para velocidad máxima e instantánea al teclear
+  const filtered = itemsCache.filter((cached) => {
+    // 1. Texto libre
     if (textQuery) {
-      const title = item.getField("title")?.toLowerCase() || "";
-      const abstract = item.getField("abstractNote")?.toLowerCase() || "";
-      const creators = item
-        .getCreators()
-        .map((c) => (c.lastName + " " + c.firstName).toLowerCase())
-        .join(" ");
-      const citekey = item.citationKey?.toLowerCase() || "";
-
       if (
-        !title.includes(textQuery) &&
-        !abstract.includes(textQuery) &&
-        !creators.includes(textQuery) &&
-        !citekey.includes(textQuery)
+        !cached.title.toLowerCase().includes(textQuery) &&
+        !cached.abstract.toLowerCase().includes(textQuery) &&
+        !cached.creators.includes(textQuery) &&
+        !cached.citekey.toLowerCase().includes(textQuery)
       ) {
         return false;
       }
     }
 
-    // 2. Filtro de Autor
-    if (authorQuery) {
-      const matchAuthor = item
-        .getCreators()
-        .some((c) => c.lastName === authorQuery || c.firstName === authorQuery);
-      if (!matchAuthor) return false;
+    // 2. Autor
+    if (authorQuery && cached.firstCreator !== authorQuery) {
+      if (!cached.creators.includes(authorQuery.toLowerCase())) return false;
     }
 
-    // 3. Filtro de Segunda Tag (Intersección)
-    if (secondTagQuery) {
-      const hasTag = item.getTags().some((t) => t.tag === secondTagQuery);
-      if (!hasTag) return false;
+    // 3. Segunda Tag (Intersección)
+    if (secondTagQuery && !cached.tags.includes(secondTagQuery)) {
+      return false;
     }
 
-    // 4. Filtro de Años
+    // 4. Años
     if (minYear || maxYear) {
-      const dateStr = item.getField("date") || "";
-      const matchYear = dateStr.match(/\d{4}/);
-      if (matchYear) {
-        const itemYear = parseInt(matchYear[0]);
-        if (minYear && itemYear < minYear) return false;
-        if (maxYear && itemYear > maxYear) return false;
+      if (cached.year) {
+        if (minYear && cached.year < minYear) return false;
+        if (maxYear && cached.year > maxYear) return false;
       } else {
-        // Si no tiene año estructurado y pusimos un filtro de año, lo excluimos
         return false;
       }
     }
 
-    // 5. Filtro de Adjuntos (PDF)
-    if (hasAttachments && !item.getAttachments().length) {
+    // 5. Adjuntos
+    if (hasAttachments && cached.attachmentsCount === 0) {
       return false;
     }
 
-    // 6. Filtro de Notas
-    if (hasNotes && !item.getNotes().length) {
+    // 6. Notas
+    if (hasNotes && cached.notesCount === 0) {
       return false;
     }
 
@@ -442,16 +534,16 @@ function applyFilters() {
   });
 
   document.getElementById("results-count").textContent =
-    `${filteredItems.length} ítems`;
-  renderResultsTable(filteredItems);
+    `${filtered.length} ítems`;
+  renderResultsTable(filtered);
 }
 
 // Renderizar la lista de elementos en la tabla central
-function renderResultsTable(items) {
+function renderResultsTable(cachedItems) {
   const tbody = document.getElementById("results-list");
   tbody.innerHTML = "";
 
-  if (items.length === 0) {
+  if (cachedItems.length === 0) {
     tbody.innerHTML = `
       <tr>
         <td colspan="4" class="table-empty">No hay elementos que coincidan con los filtros.</td>
@@ -460,61 +552,35 @@ function renderResultsTable(items) {
     return;
   }
 
-  items.forEach((item) => {
+  cachedItems.forEach((cached) => {
     const tr = document.createElement("tr");
-    if (selectedItem && selectedItem.id === item.id) {
+    if (selectedItem && selectedItem.id === cached.id) {
       tr.className = "selected";
     }
 
-    const typeLabel = item.itemType
-      ? `<span class="item-type-badge">${item.itemType}</span>`
+    const typeLabel = cached.itemType
+      ? `<span class="item-type-badge">${cached.itemType}</span>`
       : "";
-    const title = item.getField("title") || "Sin título";
-    const author =
-      item.getCreators()[0]?.lastName ||
-      item.getCreators()[0]?.firstName ||
-      "Anon.";
-
-    const dateStr = item.getField("date") || "";
-    const yearMatch = dateStr.match(/\d{4}/);
-    const year = yearMatch ? yearMatch[0] : "";
+    const title = cached.title;
+    const author = cached.firstCreator;
+    const yearDisplay = cached.year ? cached.year.toString() : "N/D";
 
     tr.innerHTML = `
-      <td class="item-title-col">${typeLabel}${title}</td>
-      <td>${author}</td>
-      <td>${year}</td>
-      <td>
-        <div class="item-actions">
-          <button class="btn btn-icon btn-copy-row-key" title="Copiar CiteKey (Atajo: C)">🔑</button>
-          <button class="btn btn-icon btn-select-zotero" title="Ver en Zotero principal">↗</button>
-        </div>
-      </td>
+      <td>${typeLabel}</td>
+      <td class="col-title" title="${title}">${title}</td>
+      <td title="${author}">${author}</td>
+      <td>${yearDisplay}</td>
     `;
 
-    // Selección al hacer click
-    tr.addEventListener("click", (e) => {
-      // Evitar que el click en los botones dispare solo la fila
-      if (e.target.tagName === "BUTTON" || e.target.classList.contains("btn"))
-        return;
-      selectItem(item, tr);
+    // Un solo clic selecciona el elemento en el panel derecho y en la ventana principal
+    tr.addEventListener("click", () => {
+      selectItem(cached.item, tr);
+      selectInMainWindow(cached.id);
     });
 
-    // Copiar llave en caliente
-    tr.querySelector(".btn-copy-row-key").addEventListener("click", (e) => {
-      e.stopPropagation();
-      Zotero.Utilities.Internal.copyTextToClipboard(item.citationKey || "");
-      showToast(`CiteKey copiada: ${item.citationKey}`);
-    });
-
-    // Enfocar en Zotero principal
-    tr.querySelector(".btn-select-zotero").addEventListener("click", (e) => {
-      e.stopPropagation();
-      selectInMainWindow(item.id);
-    });
-
-    // Doble click: abrir el PDF o adjunto
+    // Doble clic abre el lector de PDF de Zotero
     tr.addEventListener("dblclick", () => {
-      openItemAttachment(item);
+      openItemAttachment(cached.item);
     });
 
     tbody.appendChild(tr);
@@ -693,18 +759,29 @@ function handleTagAutocomplete() {
   });
 }
 
-// Renderizar atajos para agregar tags frecuentes
+// Renderizado de las tags más frecuentes asignadas al ítem
 function renderFrequentTags() {
   const container = document.getElementById("frequent-tags-list");
   container.innerHTML = "";
 
-  // Tomamos las 5 tags manuales más frecuentes del usuario
-  const topTags = allTags.filter((t) => t.type === 0).slice(0, 5);
+  // Filtrar las tags manuales del total
+  const manualTags = allTags
+    .filter((t) => t.type !== 1)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
 
-  topTags.forEach((tag, idx) => {
+  if (manualTags.length === 0) {
+    container.innerHTML = `<span style="font-size: 0.85em; color: var(--text-muted);">No hay etiquetas frecuentes.</span>`;
+    return;
+  }
+
+  manualTags.forEach((tag, index) => {
     const btn = document.createElement("button");
-    btn.className = "btn-tag-shortcut";
-    btn.textContent = `${tag.name} (Ctrl+${idx + 1})`;
+    btn.className = "tag-shortcut-btn";
+    btn.innerHTML = `
+      <span class="tag-shortcut-label">Ctrl+${index + 1}</span>
+      <span class="tag-shortcut-text">${tag.name}</span>
+    `;
 
     btn.addEventListener("click", async () => {
       if (selectedItem) {
@@ -717,43 +794,6 @@ function renderFrequentTags() {
 
     container.appendChild(btn);
   });
-}
-
-// Purgar en bloque todas las tags automáticas del usuario
-async function purgeAutomaticTags() {
-  const autoTags = allTags.filter((t) => t.type === 1);
-  if (autoTags.length === 0) {
-    showToast("No se encontraron tags automáticas para purgar.");
-    return;
-  }
-
-  const confirmPurge = confirm(
-    `¿Estás seguro de que quieres eliminar las ${autoTags.length} tags automáticas en lote? Esta acción modificará todos los documentos que las contengan.`,
-  );
-  if (!confirmPurge) return;
-
-  try {
-    Zotero.debug("[TagNavigator UI] Iniciando purga de tags automáticas...");
-
-    // Ejecutar en lote de base de datos
-    await Zotero.DB.executeTransaction(async () => {
-      for (let tag of autoTags) {
-        const tagID = Zotero.Tags.getID(tag.name);
-        if (tagID) {
-          // El método nativo de Zotero elimina la tag de todos los ítems y de la BD
-          await Zotero.Tags.removeFromAllItems(tagID);
-        }
-      }
-    });
-
-    showToast("Purga de tags automáticas completada.");
-    await refreshTags();
-    filterAndRenderTags();
-    if (currentTag) selectTag(currentTag);
-  } catch (error) {
-    Zotero.logError(error);
-    showToast("Error al purgar tags.");
-  }
 }
 
 // Pequeña utilidad de notificaciones flotantes (toast)

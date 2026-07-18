@@ -14,7 +14,7 @@ async function onStartup() {
   // Registrar el panel de preferencias en Zotero
   Zotero.PreferencePanes.register({
     pluginID: addon.data.config.addonID,
-    src: rootURI + "content/preferences.xhtml",
+    src: `chrome://${addon.data.config.addonRef}/content/preferences.xhtml`,
     label: "Zotero TagNavigator",
     image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
   });
