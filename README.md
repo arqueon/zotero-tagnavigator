@@ -25,7 +25,7 @@ Agrega la siguiente regla a tu archivo de configuración de Niri (`~/.config/nir
 ```kdl
 binds {
     // Abre o enfoca TagNavigator desde cualquier lugar del escritorio
-    Mod+Shift+T { spawn "curl" "-s" "http://127.0.0.1:23119/tagnavigator/open"; }
+    Mod+Shift+F3 { spawn "curl" "-s" "http://127.0.0.1:23119/tagnavigator/open"; }
 }
 ```
 
