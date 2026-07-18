@@ -318,12 +318,12 @@ async function refreshTags() {
   // Se selecciona tags.type en lugar de itemTags.type ya que la columna type pertenece a la tabla tags
   const rows = await Zotero.DB.queryAsync(
     `
-    SELECT tags.name as name, tags.type as type, COUNT(*) as count
+    SELECT tags.name as name, itemTags.type as type, COUNT(*) as count
     FROM tags
     JOIN itemTags USING (tagID)
     JOIN items USING (itemID)
     WHERE items.itemID NOT IN (SELECT itemID FROM deletedItems)
-    GROUP BY tags.name, tags.type
+    GROUP BY tags.name, itemTags.type
     ORDER BY count DESC, tags.name ASC
   `,
   );
