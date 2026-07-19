@@ -1415,7 +1415,7 @@ function applyItemFilters(): void {
 function sortVisibleItems(): void {
   const direction = sortDirection === "ascending" ? 1 : -1;
   visibleItems.sort((left, right) => {
-    let result = 0;
+    let result: number;
     if (sortKey === "title") {
       result = left.title.localeCompare(right.title, language, {
         sensitivity: "base",
@@ -1822,7 +1822,7 @@ function handleItemListKeyboard(event: KeyboardEvent): void {
   const activeIndex = visibleItems.findIndex(
     (item) => item.id === selectedItemID,
   );
-  let nextIndex = activeIndex;
+  let nextIndex: number;
   if (event.key === "ArrowDown")
     nextIndex = Math.min(activeIndex + 1, visibleItems.length - 1);
   else if (event.key === "ArrowUp") nextIndex = Math.max(activeIndex - 1, 0);
