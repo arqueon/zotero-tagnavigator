@@ -160,7 +160,7 @@ export class TagNavigatorService implements TagNavigatorAPI {
 
     const params: Array<string | number> = [libraryID];
     let scopeJoin = "";
-    let scopeWhere = "";
+    let scopeWhere: string;
 
     if (scope.kind === "tag") {
       scopeJoin = `

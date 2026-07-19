@@ -1,6 +1,8 @@
 import { createZToolkit } from "./utils/ztoolkit";
 import { TagNavigator } from "./modules/tagnavigator";
 
+const TOOLS_MENU_ID = "zotero-tagnavigator-tools-menu";
+
 async function onStartup() {
   await Promise.all([
     Zotero.initializationPromise,
@@ -8,10 +10,10 @@ async function onStartup() {
     Zotero.uiReadyPromise,
   ]);
 
-  // Inicializar endpoint local, cachés y observación de cambios en Zotero
+  // Initialize the local endpoint, caches, and Zotero change observers.
   TagNavigator.start();
 
-  // Registrar el panel de preferencias en Zotero
+  // Register the preferences pane in Zotero.
   Zotero.PreferencePanes.register({
     pluginID: addon.data.config.addonID,
     src: `chrome://${addon.data.config.addonRef}/content/preferences.xhtml`,
@@ -27,37 +29,49 @@ async function onStartup() {
 }
 
 async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
-  // Crear ztoolkit para esta ventana
+  // Create ztoolkit for this window.
   addon.data.ztoolkit = createZToolkit();
 
-  // Registrar el ítem en el menú "Herramientas" (Tools) de Zotero
-  ztoolkit.Menu.register("menuTools", {
-    tag: "menuitem",
-    id: "zotero-tagnavigator-tools-menu",
-    label: "Zotero TagNavigator",
-    commandListener: () => {
-      TagNavigator.openWindow();
-    },
-  });
+  // Keep a DOM fallback so the command remains available in Zotero 7 as well
+  // as newer versions that expose Zotero.MenuManager.
+  const doc = win.document;
+  doc.getElementById(TOOLS_MENU_ID)?.remove();
+
+  const toolsMenu = doc.getElementById("menu_ToolsPopup");
+  if (!toolsMenu) {
+    ztoolkit.log("Could not find Zotero's Tools menu");
+    return;
+  }
+
+  const menuItem = doc.createXULElement("menuitem");
+  menuItem.id = TOOLS_MENU_ID;
+  menuItem.setAttribute("label", "Zotero TagNavigator");
+  menuItem.addEventListener("command", () => TagNavigator.openWindow());
+  toolsMenu.appendChild(menuItem);
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
+  win.document.getElementById(TOOLS_MENU_ID)?.remove();
   ztoolkit.unregisterAll();
 }
 
 function onShutdown(): void {
-  // Desregistrar servicios y cerrar la ventana flotante
+  // Unregister services and close the floating window.
   TagNavigator.stop();
+
+  for (const win of Zotero.getMainWindows()) {
+    win.document.getElementById(TOOLS_MENU_ID)?.remove();
+  }
 
   ztoolkit.unregisterAll();
 
-  // Limpiar referencia de addon
+  // Clear the add-on reference.
   addon.data.alive = false;
   // @ts-expect-error - Plugin instance is not typed
   delete Zotero[addon.data.config.addonInstance];
 }
 
-// Controladores vacíos para cumplir la firma requerida por Zotero
+// Empty handlers required by the Zotero plug-in lifecycle contract.
 async function onNotify(
   event: string,
   type: string,
