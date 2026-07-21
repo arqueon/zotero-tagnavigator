@@ -11,6 +11,7 @@ declare namespace _ZoteroTypes {
       "selectedLibraryID": number;
       "inspectorOpen": boolean;
       "zettlrCitationFormat": boolean;
+      "itemColumnWidths": string;
       "input": string;
     };
   }

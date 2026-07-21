@@ -34,6 +34,12 @@
   --statusbar-height: 24px;
   --tag-row-height: 30px;
   --item-row-height: 34px;
+  --item-column-title: 300px;
+  --item-column-creator: 110px;
+  --item-column-creator-track: var(--item-column-creator);
+  --item-column-year: 52px;
+  --item-column-date-added: 80px;
+  --item-column-date-modified: 80px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -173,6 +179,12 @@ input::placeholder {
 }
 
 .app-shell {
+  --item-column-creator-track: var(--item-column-creator);
+  --item-table-min-width: calc(
+    80px + var(--item-column-title) + var(--item-column-creator-track) +
+      var(--item-column-year) + var(--item-column-date-added) +
+      var(--item-column-date-modified)
+  );
   position: relative;
   display: flex;
   flex-direction: column;
@@ -696,41 +708,59 @@ input::placeholder {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
 .table-header,
 .item-row {
   display: grid;
-  grid-template-columns: 32px minmax(220px, 1fr) minmax(120px, 0.42fr) 68px 64px;
+  grid-template-columns:
+    32px var(--item-column-title) var(--item-column-creator-track)
+    var(--item-column-year) var(--item-column-date-added)
+    var(--item-column-date-modified) minmax(48px, 1fr);
   align-items: center;
+  min-width: var(--item-table-min-width);
 }
 
 .table-header {
+  position: relative;
   height: 30px;
+  width: 100%;
   flex: 0 0 30px;
   background: var(--tn-sidepane);
   border-bottom: 1px solid var(--tn-divider);
   color: var(--tn-text-secondary);
+  will-change: transform;
 }
 
 .column-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  border-left: 1px solid var(--tn-border);
+  color: inherit;
+}
+
+.column-sort-button {
   display: flex;
   align-items: center;
   gap: 4px;
+  width: 100%;
   height: 100%;
-  min-height: 0;
   min-width: 0;
   padding: 0 8px;
   overflow: hidden;
   border: 0;
-  border-left: 1px solid var(--tn-border);
   border-radius: 0;
   background: transparent;
   color: inherit;
   text-align: left;
 }
 
-.column-header > span:first-child {
+.column-sort-button > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -744,6 +774,38 @@ input::placeholder {
   content: "▾";
 }
 
+.column-resizer {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  right: -5px;
+  bottom: 0;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.column-resizer::after {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: 1px;
+  background: var(--tn-border);
+  content: "";
+}
+
+.column-resizer:is(:hover, :focus-visible)::after,
+.app-shell.column-resizing .column-resizer.active::after {
+  width: 2px;
+  background: var(--tn-accent);
+}
+
+.app-shell.column-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .state-column {
   height: 100%;
   border-left: 1px solid var(--tn-border);
@@ -751,6 +813,10 @@ input::placeholder {
 
 .items-list {
   flex: 1 1 auto;
+}
+
+.items-list .virtual-spacer {
+  min-width: var(--item-table-min-width);
 }
 
 .item-row {
@@ -804,17 +870,25 @@ input::placeholder {
 
 .item-row .creator-column,
 .item-row .year-column,
+.item-row .date-added-column,
+.item-row .date-modified-column,
 .item-row .state-column {
   color: var(--tn-text-secondary);
 }
 
 .item-row[aria-selected="true"]
-  :is(.creator-column, .year-column, .state-column) {
+  :is(
+    .creator-column,
+    .year-column,
+    .date-added-column,
+    .date-modified-column,
+    .state-column
+  ) {
   color: inherit;
   opacity: 0.86;
 }
 
-.item-row .year-column {
+.item-row :is(.year-column, .date-added-column, .date-modified-column) {
   font-variant-numeric: tabular-nums;
 }
 
@@ -1380,6 +1454,10 @@ input::placeholder {
 }
 
 @media (max-width: 850px) {
+  .app-shell {
+    --item-column-creator-track: 0px;
+  }
+
   .app-identity {
     min-width: auto;
   }
@@ -1412,11 +1490,6 @@ input::placeholder {
 
   .creator-column {
     display: none !important;
-  }
-
-  .table-header,
-  .item-row {
-    grid-template-columns: 32px minmax(220px, 1fr) 68px 64px;
   }
 }
 

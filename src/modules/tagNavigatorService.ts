@@ -16,6 +16,7 @@ import type {
   ZettlrCitationFormat,
   ZettlrCitationStyle,
 } from "../types/tagNavigator";
+import { sanitizeItemColumnWidths } from "../utils/itemColumns";
 
 type TagAggregateRow = {
   name: string;
@@ -439,6 +440,12 @@ export class TagNavigatorService implements TagNavigatorAPI {
     if (typeof preferences.zettlrCitationFormat === "boolean") {
       this.setPref("zettlrCitationFormat", preferences.zettlrCitationFormat);
     }
+    if (preferences.itemColumnWidths) {
+      const widths = sanitizeItemColumnWidths(preferences.itemColumnWidths);
+      if (Object.keys(widths).length) {
+        this.setPref("itemColumnWidths", JSON.stringify(widths));
+      }
+    }
   }
 
   invalidate(): void {
@@ -506,7 +513,19 @@ export class TagNavigatorService implements TagNavigatorAPI {
       selectedLibraryID,
       inspectorOpen: this.getPref("inspectorOpen") !== false,
       zettlrCitationFormat: this.getPref("zettlrCitationFormat") === true,
+      itemColumnWidths: this.getItemColumnWidths(),
     };
+  }
+
+  private getItemColumnWidths(): NavigatorPreferences["itemColumnWidths"] {
+    const saved = this.getPref("itemColumnWidths");
+    if (typeof saved !== "string" || !saved.trim()) return {};
+
+    try {
+      return sanitizeItemColumnWidths(JSON.parse(saved));
+    } catch {
+      return {};
+    }
   }
 
   private async getZettlrCitationFormat(): Promise<ZettlrCitationFormat> {
@@ -616,6 +635,8 @@ export class TagNavigatorService implements TagNavigatorAPI {
         abstract: this.getField(item, "abstractNote"),
         date,
         year: yearMatch ? Number(yearMatch[1]) : null,
+        dateAdded: String(item.dateAdded || ""),
+        dateModified: String(item.dateModified || ""),
         itemType: String(item.itemType),
         itemTypeLabel: Zotero.ItemTypes.getLocalizedString(item.itemTypeID),
         iconURI: String(item.getImageSrc()),
