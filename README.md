@@ -25,6 +25,10 @@ designed to remain responsive with large personal and group libraries.
 - **Focused tag exploration.** Select a tag and refine its items by text,
   creator, year, PDF availability, notes, or a second intersecting tag. Click
   the active tag again, or press `Esc`, to return to whole-library search.
+- **Resizable, sortable result columns.** Drag any result-header divider to
+  persist its width, or double-click it to reset. Zotero's date added and date
+  modified appear as compact local dates, retain the full timestamp in a
+  tooltip, and sort in either ascending or descending order.
 - **Safe tag management.** Rename, merge, or remove a tag across a library
   after reviewing its scope and confirming the operation. Changes use Zotero's
   native item and transaction APIs and respect read-only group permissions.

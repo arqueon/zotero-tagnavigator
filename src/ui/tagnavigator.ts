@@ -1,5 +1,7 @@
 import type {
   CopyKind,
+  ItemColumnKey,
+  ItemColumnWidths,
   ItemDetails,
   ItemScope,
   ItemSummary,
@@ -9,14 +11,25 @@ import type {
   TagOverview,
   TagSummary,
 } from "../types/tagNavigator";
+import {
+  clampItemColumnWidth,
+  completeItemColumnWidths,
+  DEFAULT_ITEM_COLUMN_WIDTHS,
+  getItemColumnLimits,
+  ITEM_COLUMN_KEYS,
+} from "../utils/itemColumns";
+import { formatItemTimestamp } from "../utils/itemDate";
+import {
+  compareItemSummaries,
+  type ItemSortDirection,
+  type ItemSortKey,
+} from "../utils/itemSort";
 
 // The plugin sandbox typings intentionally omit browser globals, while this
 // entry point runs inside the standalone chrome HTML window.
 declare const window: WindowProxy;
 declare const document: Document;
 
-type SortKey = "title" | "creator" | "year";
-type SortDirection = "ascending" | "descending";
 type TagActionMode = "rename" | "merge" | "delete";
 
 type TagListEntry = {
@@ -79,6 +92,10 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     title: "Title",
     creator: "Creator",
     year: "Year",
+    dateAdded: "Date Added",
+    dateModified: "Date Modified",
+    resizeColumn: "Drag to resize · Double-click to reset",
+    resizeColumnLabel: "Resize {column} column",
     filesAndNotes: "Files and notes",
     itemDetails: "Item details",
     selectItem: "Select an item to inspect it.",
@@ -206,6 +223,10 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     title: "Título",
     creator: "Autor",
     year: "Año",
+    dateAdded: "Fecha de añadido",
+    dateModified: "Fecha de modificación",
+    resizeColumn: "Arrastra para ajustar · Doble clic para restaurar",
+    resizeColumnLabel: "Ajustar columna {column}",
     filesAndNotes: "Archivos y notas",
     itemDetails: "Información del elemento",
     selectItem: "Selecciona un elemento para consultar su información.",
@@ -380,8 +401,11 @@ let visibleItems: ItemSummary[] = [];
 let selectedItemID: number | null = null;
 let selectedDetails: ItemDetails | null = null;
 let frequentTagCandidates: TagSummary[] = [];
-let sortKey: SortKey = "title";
-let sortDirection: SortDirection = "ascending";
+let sortKey: ItemSortKey = "title";
+let sortDirection: ItemSortDirection = "ascending";
+let itemColumnWidths: ItemColumnWidths = {
+  ...DEFAULT_ITEM_COLUMN_WIDTHS,
+};
 let language: "en" | "es" = "en";
 let tagLoadToken = 0;
 let itemLoadToken = 0;
@@ -491,6 +515,7 @@ async function init(): Promise<void> {
       ? "es"
       : "en";
     localizeDocument();
+    configureItemColumns();
     configureStaticControls();
     configureZettlrCitationFormat();
     populateLibraries();
@@ -514,6 +539,130 @@ function configureStaticControls(): void {
     input.min = "1000";
     input.max = String(currentYear);
   }
+}
+
+const ITEM_COLUMN_CSS_VARIABLES: Record<ItemColumnKey, string> = {
+  title: "--item-column-title",
+  creator: "--item-column-creator",
+  year: "--item-column-year",
+  dateAdded: "--item-column-date-added",
+  dateModified: "--item-column-date-modified",
+};
+
+function configureItemColumns(): void {
+  itemColumnWidths = completeItemColumnWidths(
+    bootstrap?.preferences.itemColumnWidths,
+  );
+  for (const key of ITEM_COLUMN_KEYS) {
+    applyItemColumnWidth(key, itemColumnWidths[key]);
+    const resizer = document.querySelector<HTMLElement>(
+      `[data-resize-column="${key}"]`,
+    );
+    if (!resizer) continue;
+    const limits = getItemColumnLimits(key);
+    resizer.title = translate("resizeColumn");
+    resizer.setAttribute(
+      "aria-label",
+      translate("resizeColumnLabel", { column: translate(key) }),
+    );
+    resizer.setAttribute("aria-valuemin", String(limits.minimum));
+    resizer.setAttribute("aria-valuemax", String(limits.maximum));
+  }
+  syncItemHeaderScroll();
+}
+
+function itemColumnKeyFromElement(target: HTMLElement): ItemColumnKey | null {
+  const key = target.dataset.resizeColumn as ItemColumnKey | undefined;
+  return key && ITEM_COLUMN_KEYS.includes(key) ? key : null;
+}
+
+function applyItemColumnWidth(key: ItemColumnKey, width: number): void {
+  const clamped = clampItemColumnWidth(key, width);
+  itemColumnWidths[key] = clamped;
+  element("app").style.setProperty(
+    ITEM_COLUMN_CSS_VARIABLES[key],
+    `${clamped}px`,
+  );
+  document
+    .querySelector<HTMLElement>(`[data-resize-column="${key}"]`)
+    ?.setAttribute("aria-valuenow", String(clamped));
+}
+
+function persistItemColumnWidths(): void {
+  api?.savePreferences({ itemColumnWidths: { ...itemColumnWidths } });
+}
+
+function startItemColumnResize(event: PointerEvent): void {
+  if (event.button !== 0) return;
+  const resizer = event.currentTarget as HTMLElement;
+  const key = itemColumnKeyFromElement(resizer);
+  if (!key) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  const pointerID = event.pointerId;
+  const startX = event.clientX;
+  const startWidth = itemColumnWidths[key];
+  let finished = false;
+
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (resizer.hasPointerCapture(pointerID)) {
+      resizer.releasePointerCapture(pointerID);
+    }
+    resizer.classList.remove("active");
+    element("app").classList.remove("column-resizing");
+    resizer.removeEventListener("pointermove", move);
+    resizer.removeEventListener("pointerup", finish);
+    resizer.removeEventListener("pointercancel", finish);
+    persistItemColumnWidths();
+  };
+  const move = (moveEvent: PointerEvent) => {
+    applyItemColumnWidth(key, startWidth + moveEvent.clientX - startX);
+  };
+
+  resizer.classList.add("active");
+  element("app").classList.add("column-resizing");
+  resizer.setPointerCapture(pointerID);
+  resizer.addEventListener("pointermove", move);
+  resizer.addEventListener("pointerup", finish);
+  resizer.addEventListener("pointercancel", finish);
+}
+
+function resetItemColumnWidth(event: MouseEvent): void {
+  event.preventDefault();
+  event.stopPropagation();
+  const key = itemColumnKeyFromElement(event.currentTarget as HTMLElement);
+  if (!key) return;
+  applyItemColumnWidth(key, DEFAULT_ITEM_COLUMN_WIDTHS[key]);
+  persistItemColumnWidths();
+}
+
+function handleItemColumnResizeKeyboard(event: KeyboardEvent): void {
+  const key = itemColumnKeyFromElement(event.currentTarget as HTMLElement);
+  if (!key) return;
+  if (event.key === "Home") {
+    event.preventDefault();
+    applyItemColumnWidth(key, DEFAULT_ITEM_COLUMN_WIDTHS[key]);
+    persistItemColumnWidths();
+    return;
+  }
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
+  event.preventDefault();
+  const step = event.shiftKey ? 24 : 8;
+  applyItemColumnWidth(
+    key,
+    itemColumnWidths[key] + (event.key === "ArrowRight" ? step : -step),
+  );
+  persistItemColumnWidths();
+}
+
+function syncItemHeaderScroll(): void {
+  const header = element("items-header");
+  const scrollLeft = element("items-list").scrollLeft;
+  header.style.transform = `translateX(${-scrollLeft}px)`;
 }
 
 function configureZettlrCitationFormat(): void {
@@ -664,10 +813,19 @@ function bindEvents(): void {
     .querySelectorAll<HTMLButtonElement>("[data-sort]")
     .forEach((button: HTMLButtonElement) => {
       button.addEventListener("click", () =>
-        setSort(button.dataset.sort as SortKey),
+        setSort(button.dataset.sort as ItemSortKey),
       );
     });
-  element("items-list").addEventListener("keydown", handleItemListKeyboard);
+  const itemsList = element("items-list");
+  itemsList.addEventListener("keydown", handleItemListKeyboard);
+  itemsList.addEventListener("scroll", syncItemHeaderScroll);
+  document
+    .querySelectorAll<HTMLElement>("[data-resize-column]")
+    .forEach((resizer: HTMLElement) => {
+      resizer.addEventListener("pointerdown", startItemColumnResize);
+      resizer.addEventListener("dblclick", resetItemColumnWidth);
+      resizer.addEventListener("keydown", handleItemColumnResizeKeyboard);
+    });
 
   element("show-in-zotero").addEventListener("click", () => {
     if (selectedItemID) void api?.selectInMainWindow(selectedItemID);
@@ -1413,27 +1571,12 @@ function applyItemFilters(): void {
 }
 
 function sortVisibleItems(): void {
-  const direction = sortDirection === "ascending" ? 1 : -1;
-  visibleItems.sort((left, right) => {
-    let result: number;
-    if (sortKey === "title") {
-      result = left.title.localeCompare(right.title, language, {
-        sensitivity: "base",
-        numeric: true,
-      });
-    } else if (sortKey === "creator") {
-      result = left.firstCreator.localeCompare(right.firstCreator, language, {
-        sensitivity: "base",
-      });
-    } else {
-      result = (left.year ?? -Infinity) - (right.year ?? -Infinity);
-    }
-    if (!result) result = left.title.localeCompare(right.title, language);
-    return result * direction;
-  });
+  visibleItems.sort((left, right) =>
+    compareItemSummaries(left, right, sortKey, sortDirection, language),
+  );
 }
 
-function setSort(nextKey: SortKey): void {
+function setSort(nextKey: ItemSortKey): void {
   if (sortKey === nextKey) {
     sortDirection = sortDirection === "ascending" ? "descending" : "ascending";
   } else {
@@ -1445,14 +1588,29 @@ function setSort(nextKey: SortKey): void {
 
 function updateSortHeaders(): void {
   document
-    .querySelectorAll<HTMLButtonElement>("[data-sort]")
-    .forEach((button: HTMLButtonElement) => {
-      if (button.dataset.sort === sortKey) {
-        button.setAttribute("aria-sort", sortDirection);
+    .querySelectorAll<HTMLElement>(".column-header[data-column]")
+    .forEach((header: HTMLElement) => {
+      if (header.dataset.column === sortKey) {
+        header.setAttribute("aria-sort", sortDirection);
       } else {
-        button.removeAttribute("aria-sort");
+        header.removeAttribute("aria-sort");
       }
     });
+}
+
+function createTimestampCell(
+  value: string,
+  className: string,
+): HTMLSpanElement {
+  const cell = document.createElement("span");
+  cell.className = className;
+  cell.setAttribute("role", "cell");
+  if (!value) return cell;
+
+  const formatted = formatItemTimestamp(value, bootstrap?.locale || language);
+  cell.textContent = formatted.display;
+  cell.title = formatted.tooltip;
+  return cell;
 }
 
 function renderItemRow(item: ItemSummary): HTMLElement {
@@ -1486,6 +1644,15 @@ function renderItemRow(item: ItemSummary): HTMLElement {
   yearCell.setAttribute("role", "cell");
   yearCell.textContent = item.year ? String(item.year) : "";
 
+  const dateAddedCell = createTimestampCell(
+    item.dateAdded,
+    "date-added-column",
+  );
+  const dateModifiedCell = createTimestampCell(
+    item.dateModified,
+    "date-modified-column",
+  );
+
   const stateCell = document.createElement("span");
   stateCell.className = "state-column row-state-icons";
   stateCell.setAttribute("role", "cell");
@@ -1500,7 +1667,15 @@ function renderItemRow(item: ItemSummary): HTMLElement {
     stateCell.appendChild(icon);
   }
 
-  row.append(typeCell, titleCell, creatorCell, yearCell, stateCell);
+  row.append(
+    typeCell,
+    titleCell,
+    creatorCell,
+    yearCell,
+    dateAddedCell,
+    dateModifiedCell,
+    stateCell,
+  );
   row.addEventListener("click", () => void selectItem(item.id));
   return row;
 }

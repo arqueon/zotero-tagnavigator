@@ -298,35 +298,117 @@
           </div>
 
           <div id="items-table" class="items-table" role="table" hidden>
-            <div class="table-header" role="row">
+            <div id="items-header" class="table-header" role="row">
               <span class="type-column" role="columnheader"></span>
-              <button
+              <div
                 class="column-header title-column"
-                type="button"
-                data-sort="title"
+                data-column="title"
                 role="columnheader"
               >
-                <span data-i18n="title">Title</span>
-                <span class="sort-indicator"></span>
-              </button>
-              <button
+                <button
+                  class="column-sort-button"
+                  type="button"
+                  data-sort="title"
+                >
+                  <span data-i18n="title">Title</span>
+                  <span class="sort-indicator"></span>
+                </button>
+                <span
+                  class="column-resizer"
+                  data-resize-column="title"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                ></span>
+              </div>
+              <div
                 class="column-header creator-column"
-                type="button"
-                data-sort="creator"
+                data-column="creator"
                 role="columnheader"
               >
-                <span data-i18n="creator">Creator</span>
-                <span class="sort-indicator"></span>
-              </button>
-              <button
+                <button
+                  class="column-sort-button"
+                  type="button"
+                  data-sort="creator"
+                >
+                  <span data-i18n="creator">Creator</span>
+                  <span class="sort-indicator"></span>
+                </button>
+                <span
+                  class="column-resizer"
+                  data-resize-column="creator"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                ></span>
+              </div>
+              <div
                 class="column-header year-column"
-                type="button"
-                data-sort="year"
+                data-column="year"
                 role="columnheader"
               >
-                <span data-i18n="year">Year</span>
-                <span class="sort-indicator"></span>
-              </button>
+                <button
+                  class="column-sort-button"
+                  type="button"
+                  data-sort="year"
+                >
+                  <span data-i18n="year">Year</span>
+                  <span class="sort-indicator"></span>
+                </button>
+                <span
+                  class="column-resizer"
+                  data-resize-column="year"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                ></span>
+              </div>
+              <div
+                class="column-header date-added-column"
+                data-column="dateAdded"
+                data-i18n-title="dateAdded"
+                aria-label="Date Added"
+                role="columnheader"
+              >
+                <button
+                  class="column-sort-button"
+                  type="button"
+                  data-sort="dateAdded"
+                >
+                  <span data-i18n="dateAdded">Date Added</span>
+                  <span class="sort-indicator"></span>
+                </button>
+                <span
+                  class="column-resizer"
+                  data-resize-column="dateAdded"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                ></span>
+              </div>
+              <div
+                class="column-header date-modified-column"
+                data-column="dateModified"
+                data-i18n-title="dateModified"
+                aria-label="Date Modified"
+                role="columnheader"
+              >
+                <button
+                  class="column-sort-button"
+                  type="button"
+                  data-sort="dateModified"
+                >
+                  <span data-i18n="dateModified">Date Modified</span>
+                  <span class="sort-indicator"></span>
+                </button>
+                <span
+                  class="column-resizer"
+                  data-resize-column="dateModified"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                ></span>
+              </div>
               <span class="state-column" role="columnheader">
                 <span class="visually-hidden" data-i18n="filesAndNotes"
                   >Files and notes</span

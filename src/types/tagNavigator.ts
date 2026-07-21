@@ -31,6 +31,11 @@ export interface ItemTag {
   type: 0 | 1;
 }
 
+export type ItemColumnKey =
+  "title" | "creator" | "year" | "dateAdded" | "dateModified";
+
+export type ItemColumnWidths = Record<ItemColumnKey, number>;
+
 export interface ItemSummary {
   id: number;
   libraryID: number;
@@ -38,6 +43,8 @@ export interface ItemSummary {
   abstract: string;
   date: string;
   year: number | null;
+  dateAdded: string;
+  dateModified: string;
   itemType: string;
   itemTypeLabel: string;
   iconURI: string;
@@ -81,6 +88,7 @@ export interface NavigatorPreferences {
   selectedLibraryID: number;
   inspectorOpen: boolean;
   zettlrCitationFormat: boolean;
+  itemColumnWidths: Partial<ItemColumnWidths>;
 }
 
 export interface NavigatorBootstrap {
