@@ -1,6 +1,8 @@
 import { config, version as pluginVersion } from "../../package.json";
 import type {
+  BatchTagMutationResult,
   CitationStyleOption,
+  CopyMetadataResult,
   CopyKind,
   ItemDetails,
   ItemScope,
@@ -40,6 +42,23 @@ export function formatCitekeyForZettlr(
   if (citeStyle === "in-text") return `@${citekey}`;
   if (citeStyle === "in-text-suffix") return `@${citekey} []`;
   return `[@${citekey}]`;
+}
+
+/** Formats one or more citekeys as a single Zettlr/Pandoc citation. */
+export function formatCitekeysForZettlr(
+  citekeys: string[],
+  citeStyle: ZettlrCitationStyle,
+): string {
+  if (citekeys.length === 1) {
+    return formatCitekeyForZettlr(citekeys[0], citeStyle);
+  }
+  if (citeStyle === "in-text") {
+    return citekeys.map((citekey) => `@${citekey}`).join("; ");
+  }
+  if (citeStyle === "in-text-suffix") {
+    return citekeys.map((citekey) => `@${citekey} []`).join("; ");
+  }
+  return `[${citekeys.map((citekey) => `@${citekey}`).join("; ")}]`;
 }
 
 /**
@@ -273,6 +292,56 @@ export class TagNavigatorService implements TagNavigatorAPI {
     return this.getItemDetails(itemID);
   }
 
+  async addTags(
+    itemIDs: number[],
+    tagName: string,
+  ): Promise<BatchTagMutationResult> {
+    const items = await this.getEditableRegularItems(itemIDs);
+    const cleaned = this.validateTagName(tagName);
+    let affectedItems = 0;
+
+    await Zotero.DB.executeTransaction(async () => {
+      for (const item of items) {
+        if (item.hasTag(cleaned) && item.getTagType(cleaned) === 0) continue;
+        if (!item.addTag(cleaned, 0)) continue;
+        await item.save();
+        affectedItems++;
+      }
+    });
+    if (affectedItems) this.invalidate();
+    return {
+      action: "add",
+      tagName: cleaned,
+      selectedItems: items.length,
+      affectedItems,
+    };
+  }
+
+  async removeTags(
+    itemIDs: number[],
+    tagName: string,
+  ): Promise<BatchTagMutationResult> {
+    const items = await this.getEditableRegularItems(itemIDs);
+    const cleaned = this.validateTagName(tagName);
+    let affectedItems = 0;
+
+    await Zotero.DB.executeTransaction(async () => {
+      for (const item of items) {
+        if (!item.hasTag(cleaned)) continue;
+        if (!item.removeTag(cleaned)) continue;
+        await item.save();
+        affectedItems++;
+      }
+    });
+    if (affectedItems) this.invalidate();
+    return {
+      action: "remove",
+      tagName: cleaned,
+      selectedItems: items.length,
+      affectedItems,
+    };
+  }
+
   async renameTag(
     libraryID: number,
     sourceName: string,
@@ -351,28 +420,34 @@ export class TagNavigatorService implements TagNavigatorAPI {
   }
 
   async copyMetadata(
-    itemID: number,
+    itemIDs: number[],
     kind: CopyKind,
     styleID?: string,
     useZettlrFormat = false,
-  ): Promise<void> {
-    const item = await this.getRegularItem(itemID);
+  ): Promise<CopyMetadataResult> {
+    const items = await this.getRegularItems(itemIDs);
 
     if (kind === "citekey") {
-      const citekey = this.getField(item, "citationKey");
-      if (!citekey) throw new Error("NO_CITEKEY");
+      const citekeys = items
+        .map((item) => this.getField(item, "citationKey"))
+        .filter(Boolean);
+      if (!citekeys.length) throw new Error("NO_CITEKEY");
       if (useZettlrFormat) {
         const zettlrFormat = await this.getZettlrCitationFormat();
         if (!zettlrFormat.available) {
           throw new Error("ZETTLR_CONFIG_UNAVAILABLE");
         }
         Zotero.Utilities.Internal.copyTextToClipboard(
-          formatCitekeyForZettlr(citekey, zettlrFormat.citeStyle),
+          formatCitekeysForZettlr(citekeys, zettlrFormat.citeStyle),
         );
       } else {
-        Zotero.Utilities.Internal.copyTextToClipboard(citekey);
+        Zotero.Utilities.Internal.copyTextToClipboard(citekeys.join("\n"));
       }
-      return;
+      return {
+        requestedItems: items.length,
+        copiedItems: citekeys.length,
+        missingCitekeys: items.length - citekeys.length,
+      };
     }
 
     if (!styleID || !Zotero.Styles.get(styleID)) {
@@ -389,12 +464,17 @@ export class TagNavigatorService implements TagNavigatorAPI {
       Zotero.Prefs.get("export.quickCopy.locale") || Zotero.locale || "",
     );
     fileInterface.copyItemsToClipboard(
-      [item],
+      items,
       styleID,
       locale,
       false,
       kind === "citation",
     );
+    return {
+      requestedItems: items.length,
+      copiedItems: items.length,
+      missingCitekeys: 0,
+    };
   }
 
   async selectInMainWindow(itemID: number): Promise<void> {
@@ -663,6 +743,19 @@ export class TagNavigatorService implements TagNavigatorAPI {
     return item;
   }
 
+  private async getRegularItems(itemIDs: number[]): Promise<Zotero.Item[]> {
+    const uniqueIDs = Array.from(new Set(itemIDs));
+    if (!uniqueIDs.length) throw new Error("NO_ITEMS_SELECTED");
+    const items = await Zotero.Items.getAsync(uniqueIDs);
+    if (
+      items.length !== uniqueIDs.length ||
+      items.some((item) => !item?.isRegularItem())
+    ) {
+      throw new Error("ITEM_NOT_FOUND");
+    }
+    return items;
+  }
+
   private async getEditableRegularItem(itemID: number): Promise<Zotero.Item> {
     const item = await this.getRegularItem(itemID);
     const library = Zotero.Libraries.get(item.libraryID);
@@ -670,6 +763,17 @@ export class TagNavigatorService implements TagNavigatorAPI {
       throw new Error("LIBRARY_READ_ONLY");
     }
     return item;
+  }
+
+  private async getEditableRegularItems(
+    itemIDs: number[],
+  ): Promise<Zotero.Item[]> {
+    const items = await this.getRegularItems(itemIDs);
+    const libraryIDs = new Set(items.map((item) => item.libraryID));
+    if (libraryIDs.size !== 1) throw new Error("MIXED_LIBRARIES");
+    const library = Zotero.Libraries.get(items[0].libraryID);
+    if (!library || !library.editable) throw new Error("LIBRARY_READ_ONLY");
+    return items;
   }
 
   private assertEditableLibrary(libraryID: number): void {

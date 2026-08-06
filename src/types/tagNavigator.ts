@@ -104,6 +104,19 @@ export interface NavigatorBootstrap {
 
 export type CopyKind = "citekey" | "citation" | "bibliography";
 
+export interface CopyMetadataResult {
+  requestedItems: number;
+  copiedItems: number;
+  missingCitekeys: number;
+}
+
+export interface BatchTagMutationResult {
+  action: "add" | "remove";
+  tagName: string;
+  selectedItems: number;
+  affectedItems: number;
+}
+
 export interface TagMutationResult {
   action: "rename" | "merge" | "delete";
   sourceName: string;
@@ -119,6 +132,11 @@ export interface TagNavigatorAPI {
   getItemDetails(itemID: number): Promise<ItemDetails>;
   addTag(itemID: number, tagName: string): Promise<ItemDetails>;
   removeTag(itemID: number, tagName: string): Promise<ItemDetails>;
+  addTags(itemIDs: number[], tagName: string): Promise<BatchTagMutationResult>;
+  removeTags(
+    itemIDs: number[],
+    tagName: string,
+  ): Promise<BatchTagMutationResult>;
   renameTag(
     libraryID: number,
     sourceName: string,
@@ -131,11 +149,11 @@ export interface TagNavigatorAPI {
   ): Promise<TagMutationResult>;
   deleteTag(libraryID: number, tagName: string): Promise<TagMutationResult>;
   copyMetadata(
-    itemID: number,
+    itemIDs: number[],
     kind: CopyKind,
     styleID?: string,
     useZettlrFormat?: boolean,
-  ): Promise<void>;
+  ): Promise<CopyMetadataResult>;
   selectInMainWindow(itemID: number): Promise<void>;
   openBestAttachment(itemID: number): Promise<boolean>;
   savePreferences(preferences: Partial<NavigatorPreferences>): void;

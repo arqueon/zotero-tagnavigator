@@ -35,13 +35,17 @@ designed to remain responsive with large personal and group libraries.
 - **Deliberate window switching.** Selecting a result only updates the
   inspector. Use **Open in Zotero** to reveal the item in the main library, or
   **Open file** to launch its best attachment with Zotero's native viewer.
-- **Quick tagging.** Add tags with autocomplete, remove them from the selected
-  item, or use `Ctrl+1` through `Ctrl+5` for frequently used manual tags.
-- **Academic Quick Copy.** Copy a CiteKey, formatted citation, or bibliography
-  through Zotero's CSL and Quick Copy APIs.
+- **Multi-item selection.** Use row checkboxes, `Ctrl`/`Cmd`-click, Shift-click,
+  or `Ctrl`/`Cmd+A` to select visible results without giving up virtualization.
+- **Batch tagging.** Add a tag to every selected item or remove a shared tag
+  from the whole selection in one Zotero transaction. `Ctrl+1` through
+  `Ctrl+5` still applies frequently used manual tags.
+- **Academic Quick Copy.** Copy CiteKeys, a formatted citation, a bibliography,
+  or APA references for the complete selection through Zotero's CSL engine.
 - **Zettlr-ready citations.** Enable **Zettlr citation format** next to CiteKey
-  to read Zettlr's `editor.citeStyle` setting and copy `[@key]`, `@key`, or
-  `@key []` in the format expected by Zettlr.
+  to read Zettlr's `editor.citeStyle` setting and copy one or more keys exactly
+  as the editor expects, including grouped citations such as
+  `[@firstKey; @secondKey]`.
 - **Large-library performance.** Virtualized tag and item lists render only
   visible rows. Global results load progressively, display up to 500 rows, and
   preserve the full match count.
