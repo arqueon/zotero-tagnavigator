@@ -2,6 +2,7 @@ import { assert } from "chai";
 import { config } from "../package.json";
 import {
   formatCitekeyForZettlr,
+  formatCitekeysForZettlr,
   TagNavigatorService,
 } from "../src/modules/tagNavigatorService";
 import type { ItemSummary } from "../src/types/tagNavigator";
@@ -75,6 +76,96 @@ describe("startup", function () {
       formatCitekeyForZettlr("Author2026", "in-text-suffix"),
       "@Author2026 []",
     );
+    assert.strictEqual(
+      formatCitekeysForZettlr(["Author2026", "Editor2025"], "regular"),
+      "[@Author2026; @Editor2025]",
+    );
+    assert.strictEqual(
+      formatCitekeysForZettlr(["Author2026", "Editor2025"], "in-text"),
+      "@Author2026; @Editor2025",
+    );
+  });
+
+  it("should add and remove a tag across multiple items atomically", async function () {
+    this.timeout(15000);
+    const tagName = `TagNavigator batch ${Date.now()}`;
+    const items = [new Zotero.Item("book"), new Zotero.Item("journalArticle")];
+    for (const [index, item] of items.entries()) {
+      item.libraryID = Zotero.Libraries.userLibraryID;
+      item.setField("title", `TagNavigator batch item ${index + 1}`);
+      await item.saveTx();
+    }
+    items[0].addTag(tagName, 1);
+    await items[0].saveTx();
+
+    try {
+      const service = new TagNavigatorService();
+      const added = await service.addTags(
+        items.map((item) => item.id),
+        tagName,
+      );
+      assert.strictEqual(added.selectedItems, 2);
+      assert.strictEqual(added.affectedItems, 2);
+      assert.isTrue(
+        items.every((item) =>
+          item.getTags().some((tag) => tag.tag === tagName),
+        ),
+      );
+      assert.isTrue(items.every((item) => item.getTagType(tagName) === 0));
+
+      const repeated = await service.addTags(
+        items.map((item) => item.id),
+        tagName,
+      );
+      assert.strictEqual(repeated.affectedItems, 0);
+
+      const removed = await service.removeTags(
+        items.map((item) => item.id),
+        tagName,
+      );
+      assert.strictEqual(removed.affectedItems, 2);
+      assert.isTrue(
+        items.every(
+          (item) => !item.getTags().some((tag) => tag.tag === tagName),
+        ),
+      );
+    } finally {
+      for (const item of items) await item.eraseTx();
+    }
+  });
+
+  it("should copy multiple citekeys in raw and Zettlr formats", async function () {
+    const service = new TagNavigatorService() as any;
+    service.getRegularItems = async () => [
+      { getField: () => "Author2026" },
+      { getField: () => "" },
+      { getField: () => "Editor2025" },
+    ];
+    service.getZettlrCitationFormat = async () => ({
+      available: true,
+      citeStyle: "regular",
+      preview: "[@CiteKey]",
+    });
+
+    const clipboard = Zotero.Utilities.Internal as any;
+    const originalCopy = clipboard.copyTextToClipboard;
+    const copied: string[] = [];
+    clipboard.copyTextToClipboard = (value: string) => copied.push(value);
+
+    try {
+      const raw = await service.copyMetadata([1, 2, 3], "citekey");
+      assert.strictEqual(copied.pop(), "Author2026\nEditor2025");
+      assert.deepEqual(raw, {
+        requestedItems: 3,
+        copiedItems: 2,
+        missingCitekeys: 1,
+      });
+
+      await service.copyMetadata([1, 2, 3], "citekey", undefined, true);
+      assert.strictEqual(copied.pop(), "[@Author2026; @Editor2025]");
+    } finally {
+      clipboard.copyTextToClipboard = originalCopy;
+    }
   });
 
   it("should sort item results by date added and date modified", function () {

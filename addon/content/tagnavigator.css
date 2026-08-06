@@ -715,7 +715,7 @@ input::placeholder {
 .item-row {
   display: grid;
   grid-template-columns:
-    32px var(--item-column-title) var(--item-column-creator-track)
+    52px var(--item-column-title) var(--item-column-creator-track)
     var(--item-column-year) var(--item-column-date-added)
     var(--item-column-date-modified) minmax(48px, 1fr);
   align-items: center;
@@ -731,6 +731,20 @@ input::placeholder {
   border-bottom: 1px solid var(--tn-divider);
   color: var(--tn-text-secondary);
   will-change: transform;
+}
+
+.table-header .selection-column {
+  position: relative;
+  display: block;
+  height: 100%;
+  padding: 0;
+}
+
+#select-visible-items {
+  position: absolute;
+  top: 50%;
+  left: calc((100% - 35px) / 2);
+  transform: translateY(-50%);
 }
 
 .column-header {
@@ -849,8 +863,23 @@ input::placeholder {
 
 .item-row .type-column {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 5px;
   padding: 0;
+}
+
+.selection-column input,
+.item-select-checkbox {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--tn-accent);
+}
+
+.item-row[aria-selected="true"] .item-select-checkbox {
+  accent-color: var(--tn-accent-text);
 }
 
 .item-type-icon {
@@ -1233,7 +1262,8 @@ input::placeholder {
   padding: 0 12px 12px 28px;
 }
 
-.copy-actions button:first-child {
+.copy-actions button:first-child,
+.copy-actions button:last-child {
   grid-column: 1 / -1;
 }
 

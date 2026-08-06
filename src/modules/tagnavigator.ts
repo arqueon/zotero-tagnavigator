@@ -25,6 +25,10 @@ export class TagNavigatorManager {
       this.service.addTag(itemID, tagName),
     removeTag: (itemID: number, tagName: string) =>
       this.service.removeTag(itemID, tagName),
+    addTags: (itemIDs: number[], tagName: string) =>
+      this.service.addTags(itemIDs, tagName),
+    removeTags: (itemIDs: number[], tagName: string) =>
+      this.service.removeTags(itemIDs, tagName),
     renameTag: (libraryID: number, sourceName: string, targetName: string) =>
       this.service.renameTag(libraryID, sourceName, targetName),
     mergeTags: (libraryID: number, sourceName: string, targetName: string) =>
@@ -32,11 +36,11 @@ export class TagNavigatorManager {
     deleteTag: (libraryID: number, tagName: string) =>
       this.service.deleteTag(libraryID, tagName),
     copyMetadata: (
-      itemID: number,
+      itemIDs: number[],
       kind: CopyKind,
       styleID?: string,
       useZettlrFormat?: boolean,
-    ) => this.service.copyMetadata(itemID, kind, styleID, useZettlrFormat),
+    ) => this.service.copyMetadata(itemIDs, kind, styleID, useZettlrFormat),
     selectInMainWindow: (itemID: number) =>
       this.service.selectInMainWindow(itemID),
     openBestAttachment: (itemID: number) =>

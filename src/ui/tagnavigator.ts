@@ -43,6 +43,8 @@ type TagListEntry = {
 type TranslationValue = string;
 type TranslationTable = Record<string, TranslationValue>;
 
+const APA_STYLE_ID = "http://www.zotero.org/styles/apa";
+
 const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
   en: {
     library: "Library",
@@ -97,8 +99,13 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     resizeColumn: "Drag to resize · Double-click to reset",
     resizeColumnLabel: "Resize {column} column",
     filesAndNotes: "Files and notes",
+    selectAllVisible: "Select all visible items",
+    selectItemCheckbox: "Select {title}",
     itemDetails: "Item details",
     selectItem: "Select an item to inspect it.",
+    selectedItems: "{count} items selected",
+    batchEditing: "Batch editing",
+    batchTags: "Batch tags",
     showInZotero: "Open in Zotero",
     openFile: "Open file",
     info: "Info",
@@ -114,6 +121,7 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     zettlrConfigUnavailable: "Zettlr configuration not found",
     copyCitation: "Copy citation",
     copyBibliography: "Copy bibliography",
+    copyAPA: "Copy APA references",
     loadingLibrary: "Loading library…",
     loadingTags: "Loading tags…",
     loadingItems: "Loading items…",
@@ -129,8 +137,14 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     copiedZettlrCitation: "Zettlr citation copied",
     copiedCitation: "Citation copied",
     copiedBibliography: "Bibliography copied",
+    copiedAPA: "APA references copied",
+    copiedItems: "Copied {count} items",
+    copiedCitekeysWithMissing:
+      "Copied {count} CiteKeys; {missing} selected items had no CiteKey",
     tagAdded: "Tag added: {tag}",
     tagRemoved: "Tag removed: {tag}",
+    batchTagAdded: "Added “{tag}” to {count} items",
+    batchTagRemoved: "Removed “{tag}” from {count} items",
     tagActions: "Tag actions",
     renameTag: "Rename tag…",
     mergeTag: "Merge into…",
@@ -228,8 +242,13 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     resizeColumn: "Arrastra para ajustar · Doble clic para restaurar",
     resizeColumnLabel: "Ajustar columna {column}",
     filesAndNotes: "Archivos y notas",
+    selectAllVisible: "Seleccionar todos los elementos visibles",
+    selectItemCheckbox: "Seleccionar {title}",
     itemDetails: "Información del elemento",
     selectItem: "Selecciona un elemento para consultar su información.",
+    selectedItems: "{count} elementos seleccionados",
+    batchEditing: "Edición por lotes",
+    batchTags: "Etiquetas por lotes",
     showInZotero: "Abrir en Zotero",
     openFile: "Abrir archivo",
     info: "Información",
@@ -245,6 +264,7 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     zettlrConfigUnavailable: "No se encontró la configuración de Zettlr",
     copyCitation: "Copiar cita",
     copyBibliography: "Copiar bibliografía",
+    copyAPA: "Copiar referencias APA",
     loadingLibrary: "Cargando biblioteca…",
     loadingTags: "Cargando etiquetas…",
     loadingItems: "Cargando elementos…",
@@ -260,8 +280,14 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     copiedZettlrCitation: "Cita para Zettlr copiada",
     copiedCitation: "Cita copiada",
     copiedBibliography: "Bibliografía copiada",
+    copiedAPA: "Referencias APA copiadas",
+    copiedItems: "Se copiaron {count} elementos",
+    copiedCitekeysWithMissing:
+      "Se copiaron {count} CiteKeys; {missing} elementos seleccionados no tenían CiteKey",
     tagAdded: "Etiqueta añadida: {tag}",
     tagRemoved: "Etiqueta eliminada: {tag}",
+    batchTagAdded: "Se añadió “{tag}” a {count} elementos",
+    batchTagRemoved: "Se quitó “{tag}” de {count} elementos",
     tagActions: "Acciones de etiqueta",
     renameTag: "Renombrar etiqueta…",
     mergeTag: "Fusionar con…",
@@ -399,6 +425,8 @@ let visibleTagRows: TagListEntry[] = [];
 let allItems: ItemSummary[] = [];
 let visibleItems: ItemSummary[] = [];
 let selectedItemID: number | null = null;
+let selectedItemIDs = new Set<number>();
+let selectionAnchorID: number | null = null;
 let selectedDetails: ItemDetails | null = null;
 let frequentTagCandidates: TagSummary[] = [];
 let sortKey: ItemSortKey = "title";
@@ -819,6 +847,14 @@ function bindEvents(): void {
   const itemsList = element("items-list");
   itemsList.addEventListener("keydown", handleItemListKeyboard);
   itemsList.addEventListener("scroll", syncItemHeaderScroll);
+  element<HTMLInputElement>("select-visible-items").addEventListener(
+    "change",
+    (event) => {
+      const checkbox = event.currentTarget as HTMLInputElement;
+      if (checkbox.checked) selectAllVisibleItems();
+      else clearItemSelection();
+    },
+  );
   document
     .querySelectorAll<HTMLElement>("[data-resize-column]")
     .forEach((resizer: HTMLElement) => {
@@ -853,6 +889,10 @@ function bindEvents(): void {
   element("copy-bibliography").addEventListener(
     "click",
     () => void copySelected("bibliography"),
+  );
+  element("copy-apa").addEventListener(
+    "click",
+    () => void copySelected("bibliography", APA_STYLE_ID),
   );
 
   element<HTMLFormElement>("add-tag-form").addEventListener(
@@ -910,6 +950,8 @@ async function loadLibrary(libraryID: number): Promise<void> {
   overview = null;
   currentScope = null;
   selectedItemID = null;
+  selectedItemIDs.clear();
+  selectionAnchorID = null;
   selectedDetails = null;
   allItems = [];
   visibleItems = [];
@@ -1297,6 +1339,8 @@ async function selectScope(scope: ItemScope): Promise<void> {
   const token = ++itemLoadToken;
   currentScope = scope;
   selectedItemID = null;
+  selectedItemIDs.clear();
+  selectionAnchorID = null;
   selectedDetails = null;
   allItems = [];
   visibleItems = [];
@@ -1337,6 +1381,8 @@ function enterLibrarySearch(): void {
   librarySearchTotal = 0;
   librarySearchLimited = false;
   selectedItemID = null;
+  selectedItemIDs.clear();
+  selectionAnchorID = null;
   selectedDetails = null;
   allItems = [];
   visibleItems = [];
@@ -1435,6 +1481,8 @@ function handleItemSearchInput(): void {
     allItems = [];
     visibleItems = [];
     selectedItemID = null;
+    selectedItemIDs.clear();
+    selectionAnchorID = null;
     resetInspector();
     setResultFilterControlsEnabled(false);
     element("results-count").textContent = "0";
@@ -1460,13 +1508,14 @@ function handleItemSearchInput(): void {
 
 async function searchWholeLibrary(
   query: string,
-  preserveItemID: number | null = null,
+  preserveItemIDs: number[] = [],
 ): Promise<void> {
   if (!api || currentScope) return;
   const token = ++itemLoadToken;
   librarySearchQuery = query;
-  selectedItemID = preserveItemID;
-  if (!preserveItemID) resetInspector();
+  selectedItemIDs = new Set(preserveItemIDs);
+  selectedItemID = preserveItemIDs[0] || null;
+  if (!preserveItemIDs.length) resetInspector();
   hideError();
 
   try {
@@ -1485,15 +1534,10 @@ async function searchWholeLibrary(
     setResultFilterControlsEnabled(allItems.length > 0);
     applyItemFilters();
 
-    if (preserveItemID && allItems.some((item) => item.id === preserveItemID)) {
-      await selectItem(preserveItemID);
-    } else if (preserveItemID) {
-      selectedItemID = null;
-      resetInspector();
-    }
+    await restoreItemSelection(preserveItemIDs);
   } catch (error) {
     if (token !== itemLoadToken) return;
-    showError(error, () => searchWholeLibrary(query, preserveItemID));
+    showError(error, () => searchWholeLibrary(query, preserveItemIDs));
     showItemsEmpty("noItemsTitle", "noItemsBody");
   }
 }
@@ -1555,19 +1599,43 @@ function applyItemFilters(): void {
   }
 
   if (!visibleItems.length) {
+    const hadSelection = selectedItemIDs.size > 0;
+    selectedItemIDs.clear();
+    selectedItemID = null;
+    selectionAnchorID = null;
     if (allItems.length || !currentScope) {
       showItemsEmpty("noItemsTitle", "noItemsBody");
     } else {
       showItemsEmpty("emptyTagTitle", "emptyTagBody");
     }
     itemVirtualList.setItems([]);
+    updateSelectionControls();
+    if (hadSelection) resetInspector();
     return;
   }
 
   element("items-empty").hidden = true;
   element("items-table").hidden = false;
   itemVirtualList.setItems(visibleItems);
+  const selectionChanged = pruneSelectionToVisibleItems();
+  updateSelectionControls();
+  if (selectionChanged) void updateInspectorForSelection();
   updateSortHeaders();
+}
+
+function pruneSelectionToVisibleItems(): boolean {
+  const visibleIDs = new Set(visibleItems.map((item) => item.id));
+  const previousSize = selectedItemIDs.size;
+  for (const itemID of selectedItemIDs) {
+    if (!visibleIDs.has(itemID)) selectedItemIDs.delete(itemID);
+  }
+  if (selectedItemID !== null && !visibleIDs.has(selectedItemID)) {
+    selectedItemID = getSelectedItemIDs()[0] || null;
+  }
+  if (selectionAnchorID !== null && !visibleIDs.has(selectionAnchorID)) {
+    selectionAnchorID = selectedItemID;
+  }
+  return previousSize !== selectedItemIDs.size;
 }
 
 function sortVisibleItems(): void {
@@ -1617,15 +1685,29 @@ function renderItemRow(item: ItemSummary): HTMLElement {
   const row = document.createElement("div");
   row.className = "item-row";
   row.setAttribute("role", "row");
-  row.setAttribute("aria-selected", String(item.id === selectedItemID));
+  row.setAttribute("aria-selected", String(selectedItemIDs.has(item.id)));
   row.dataset.itemId = String(item.id);
 
   const typeCell = document.createElement("span");
   typeCell.className = "type-column";
   typeCell.setAttribute("role", "cell");
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "item-select-checkbox";
+  checkbox.checked = selectedItemIDs.has(item.id);
+  checkbox.setAttribute(
+    "aria-label",
+    translate("selectItemCheckbox", {
+      title: item.title || translate("untitled"),
+    }),
+  );
+  checkbox.addEventListener("click", (event) => {
+    event.stopPropagation();
+    updateItemSelection(item.id, event as MouseEvent, true);
+  });
   const typeIcon = createIcon(item.iconURI, "item-type-icon");
   typeIcon.title = item.itemTypeLabel;
-  typeCell.appendChild(typeIcon);
+  typeCell.append(checkbox, typeIcon);
 
   const titleCell = document.createElement("span");
   titleCell.className = "title-column";
@@ -1676,22 +1758,130 @@ function renderItemRow(item: ItemSummary): HTMLElement {
     dateModifiedCell,
     stateCell,
   );
-  row.addEventListener("click", () => void selectItem(item.id));
+  row.addEventListener("click", (event) =>
+    updateItemSelection(item.id, event as MouseEvent, false),
+  );
   return row;
 }
 
-async function selectItem(itemID: number): Promise<void> {
-  if (!api) return;
-  selectedItemID = itemID;
-  selectedDetails = null;
+function updateItemSelection(
+  itemID: number,
+  event: MouseEvent | KeyboardEvent,
+  checkboxToggle: boolean,
+): void {
+  const additive = event.ctrlKey || event.metaKey || checkboxToggle;
+  const range = event.shiftKey;
+
+  if (range && selectionAnchorID !== null) {
+    const anchorIndex = visibleItems.findIndex(
+      (item) => item.id === selectionAnchorID,
+    );
+    const itemIndex = visibleItems.findIndex((item) => item.id === itemID);
+    if (anchorIndex >= 0 && itemIndex >= 0) {
+      if (!additive) selectedItemIDs.clear();
+      const start = Math.min(anchorIndex, itemIndex);
+      const end = Math.max(anchorIndex, itemIndex);
+      for (let index = start; index <= end; index++) {
+        selectedItemIDs.add(visibleItems[index].id);
+      }
+    }
+  } else if (additive) {
+    if (selectedItemIDs.has(itemID)) selectedItemIDs.delete(itemID);
+    else selectedItemIDs.add(itemID);
+    selectionAnchorID = itemID;
+  } else {
+    selectedItemIDs = new Set([itemID]);
+    selectionAnchorID = itemID;
+  }
+
+  selectedItemID = selectedItemIDs.has(itemID)
+    ? itemID
+    : getSelectedItemIDs()[0] || null;
+  updateSelectionControls();
   itemVirtualList.refresh();
+  void updateInspectorForSelection();
+}
+
+function selectAllVisibleItems(): void {
+  selectedItemIDs = new Set(visibleItems.map((item) => item.id));
+  selectedItemID = visibleItems[0]?.id || null;
+  selectionAnchorID = selectedItemID;
+  updateSelectionControls();
+  itemVirtualList.refresh();
+  void updateInspectorForSelection();
+}
+
+function clearItemSelection(): void {
+  ++detailLoadToken;
+  selectedItemIDs.clear();
+  selectedItemID = null;
+  selectionAnchorID = null;
+  selectedDetails = null;
+  updateSelectionControls();
+  itemVirtualList.refresh();
+  resetInspector();
+}
+
+function getSelectedItemIDs(): number[] {
+  return visibleItems
+    .filter((item) => selectedItemIDs.has(item.id))
+    .map((item) => item.id);
+}
+
+function updateSelectionControls(): void {
+  const checkbox = element<HTMLInputElement>("select-visible-items");
+  const selectedVisible = visibleItems.filter((item) =>
+    selectedItemIDs.has(item.id),
+  ).length;
+  checkbox.checked = Boolean(
+    visibleItems.length && selectedVisible === visibleItems.length,
+  );
+  checkbox.indeterminate =
+    selectedVisible > 0 && selectedVisible < visibleItems.length;
+  checkbox.disabled = visibleItems.length === 0;
+}
+
+async function restoreItemSelection(itemIDs: number[]): Promise<void> {
+  const available = new Set(visibleItems.map((item) => item.id));
+  selectedItemIDs = new Set(itemIDs.filter((itemID) => available.has(itemID)));
+  selectedItemID = itemIDs.find((itemID) => available.has(itemID)) || null;
+  selectionAnchorID = selectedItemID;
+  updateSelectionControls();
+  itemVirtualList.refresh();
+  await updateInspectorForSelection();
+}
+
+async function updateInspectorForSelection(): Promise<void> {
+  const itemIDs = getSelectedItemIDs();
+  if (!itemIDs.length) {
+    resetInspector();
+    return;
+  }
   setInspectorOpen(true, false);
+  if (itemIDs.length > 1) {
+    ++detailLoadToken;
+    renderMultiInspector(itemIDs);
+    return;
+  }
+  selectedItemID = itemIDs[0];
+  await loadSelectedItemDetails(itemIDs[0]);
+}
+
+async function loadSelectedItemDetails(itemID: number): Promise<void> {
+  if (!api) return;
+  selectedDetails = null;
   showInspectorLoading();
 
   const token = ++detailLoadToken;
   try {
     const details = await api.getItemDetails(itemID);
-    if (token !== detailLoadToken || selectedItemID !== itemID) return;
+    if (
+      token !== detailLoadToken ||
+      selectedItemID !== itemID ||
+      selectedItemIDs.size !== 1
+    ) {
+      return;
+    }
     selectedDetails = details;
     renderInspector(details);
   } catch (error) {
@@ -1699,7 +1889,31 @@ async function selectItem(itemID: number): Promise<void> {
   }
 }
 
+function renderMultiInspector(itemIDs: number[]): void {
+  selectedDetails = null;
+  element("inspector-empty").hidden = true;
+  element("inspector-content").hidden = false;
+  element("inspector-heading-title").textContent = translate("selectedItems", {
+    count: itemIDs.length,
+  });
+  element<HTMLImageElement>("detail-type-icon").hidden = true;
+  element("detail-title").textContent = translate("selectedItems", {
+    count: itemIDs.length,
+  });
+  element("detail-byline").textContent = translate("batchEditing");
+  element("item-info-section").hidden = true;
+  element("item-action-row").hidden = true;
+  element("item-tags-heading").textContent = translate("batchTags");
+  renderBatchTags(itemIDs);
+  renderFrequentTagsForSelection(itemIDs);
+  const editable = isCurrentLibraryEditable();
+  element<HTMLInputElement>("quick-tag-add").disabled = !editable;
+  element<HTMLFormElement>("add-tag-form").querySelector("button")!.disabled =
+    !editable;
+}
+
 function showInspectorLoading(): void {
+  element("inspector-heading-title").textContent = translate("itemDetails");
   element("inspector-empty").hidden = false;
   element("inspector-empty").querySelector("p")!.textContent =
     translate("loadingDetails");
@@ -1709,7 +1923,9 @@ function showInspectorLoading(): void {
 function renderInspector(details: ItemDetails): void {
   element("inspector-empty").hidden = true;
   element("inspector-content").hidden = false;
+  element("inspector-heading-title").textContent = translate("itemDetails");
   const icon = element<HTMLImageElement>("detail-type-icon");
+  icon.hidden = false;
   icon.src = details.iconURI;
   icon.title = details.itemTypeLabel;
   element("detail-title").textContent = details.title || translate("untitled");
@@ -1724,6 +1940,9 @@ function renderInspector(details: ItemDetails): void {
   setMetadata("detail-publication", details.publicationTitle);
   setMetadata("detail-doi", details.doi);
   setMetadata("detail-citekey", details.citekey);
+  element("item-info-section").hidden = false;
+  element("item-action-row").hidden = false;
+  element("item-tags-heading").textContent = translate("tags");
   element("detail-tag-count").textContent = String(details.tags.length);
   element<HTMLButtonElement>("open-attachment").disabled =
     details.attachmentCount === 0;
@@ -1770,6 +1989,76 @@ function renderItemTags(details: ItemDetails): void {
   container.replaceChildren(fragment);
 }
 
+function renderBatchTags(itemIDs: number[]): void {
+  const items = visibleItems.filter((item) => itemIDs.includes(item.id));
+  const batchTags = tagCoverageForItems(items);
+  element("detail-tag-count").textContent = String(batchTags.length);
+  const container = element("detail-tags");
+  const fragment = document.createDocumentFragment();
+  const editable = isCurrentLibraryEditable();
+
+  for (const tag of batchTags) {
+    const chip = document.createElement("span");
+    chip.className = `tag-chip ${tag.type === 1 ? "automatic" : "manual"}`;
+    const label = document.createElement("span");
+    label.textContent = `${tag.name} · ${tag.count}/${items.length}`;
+    label.title = label.textContent;
+    chip.appendChild(label);
+    if (editable) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.title = `${translate("dismiss")}: ${tag.name}`;
+      remove.setAttribute("aria-label", remove.title);
+      remove.appendChild(
+        createIcon("chrome://zotero/skin/16/universal/x-8.svg"),
+      );
+      remove.addEventListener("click", () => void removeSelectedTag(tag.name));
+      chip.appendChild(remove);
+    }
+    fragment.appendChild(chip);
+  }
+  container.replaceChildren(fragment);
+}
+
+function tagCoverageForItems(
+  items: ItemSummary[],
+): Array<ItemSummary["tags"][number] & { count: number }> {
+  const coverage = new Map<
+    string,
+    ItemSummary["tags"][number] & { count: number }
+  >();
+  for (const item of items) {
+    for (const tag of item.tags) {
+      const current = coverage.get(tag.name);
+      if (current) {
+        current.count++;
+        if (tag.type === 0) current.type = 0;
+      } else {
+        coverage.set(tag.name, { ...tag, count: 1 });
+      }
+    }
+  }
+  return Array.from(coverage.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, language),
+  );
+}
+
+function commonTagsForItems(items: ItemSummary[]): ItemSummary["tags"] {
+  if (!items.length) return [];
+  const remaining = new Map(
+    items[0].tags.map((tag) => [tag.name, tag] as const),
+  );
+  for (const item of items.slice(1)) {
+    const names = new Set(item.tags.map((tag) => tag.name));
+    for (const name of remaining.keys()) {
+      if (!names.has(name)) remaining.delete(name);
+    }
+  }
+  return Array.from(remaining.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, language),
+  );
+}
+
 function renderFrequentTags(details: ItemDetails): void {
   const container = element("frequent-tags");
   if (!overview || !isCurrentLibraryEditable()) {
@@ -1800,6 +2089,39 @@ function renderFrequentTags(details: ItemDetails): void {
   container.replaceChildren(fragment);
 }
 
+function renderFrequentTagsForSelection(itemIDs: number[]): void {
+  const container = element("frequent-tags");
+  if (!overview || !isCurrentLibraryEditable()) {
+    container.replaceChildren();
+    frequentTagCandidates = [];
+    return;
+  }
+
+  const items = visibleItems.filter((item) => itemIDs.includes(item.id));
+  const assignedToAll = new Set(
+    commonTagsForItems(items).map((tag) => tag.name),
+  );
+  frequentTagCandidates = overview.tags
+    .filter((tag) => tag.kind !== "automatic" && !assignedToAll.has(tag.name))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, language))
+    .slice(0, 5);
+  const fragment = document.createDocumentFragment();
+  frequentTagCandidates.forEach((tag, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "frequent-tag-button";
+    button.title = tag.name;
+    const key = document.createElement("kbd");
+    key.textContent = `Ctrl+${index + 1}`;
+    const label = document.createElement("span");
+    label.textContent = tag.name;
+    button.append(key, label);
+    button.addEventListener("click", () => void addTag(tag.name));
+    fragment.appendChild(button);
+  });
+  container.replaceChildren(fragment);
+}
+
 async function submitTagInput(): Promise<void> {
   const input = element<HTMLInputElement>("quick-tag-add");
   const tagName =
@@ -1811,7 +2133,9 @@ async function submitTagInput(): Promise<void> {
 }
 
 async function addTag(tagName: string): Promise<void> {
-  if (!api || !selectedItemID) return;
+  if (!api) return;
+  const itemIDs = getSelectedItemIDs();
+  if (!itemIDs.length) return;
   if (!isCurrentLibraryEditable()) {
     showToast(translate("readOnlyLibrary"), true);
     return;
@@ -1819,35 +2143,54 @@ async function addTag(tagName: string): Promise<void> {
 
   try {
     suppressNotificationsUntil = Date.now() + 1200;
-    const details = await api.addTag(selectedItemID, tagName);
-    selectedDetails = details;
+    if (itemIDs.length === 1) {
+      selectedDetails = await api.addTag(itemIDs[0], tagName);
+    } else {
+      const result = await api.addTags(itemIDs, tagName);
+      showToast(
+        translate("batchTagAdded", {
+          tag: result.tagName,
+          count: result.affectedItems,
+        }),
+      );
+    }
     element<HTMLInputElement>("quick-tag-add").value = "";
     closeAutocomplete();
-    renderInspector(details);
-    showToast(translate("tagAdded", { tag: tagName }));
-    await refreshAfterMutation();
+    if (itemIDs.length === 1) {
+      showToast(translate("tagAdded", { tag: tagName }));
+    }
+    await refreshAfterMutation(itemIDs);
   } catch (error) {
     showError(error);
   }
 }
 
 async function removeSelectedTag(tagName: string): Promise<void> {
-  if (!api || !selectedItemID) return;
+  if (!api) return;
+  const itemIDs = getSelectedItemIDs();
+  if (!itemIDs.length) return;
   try {
     suppressNotificationsUntil = Date.now() + 1200;
-    const details = await api.removeTag(selectedItemID, tagName);
-    selectedDetails = details;
-    renderInspector(details);
-    showToast(translate("tagRemoved", { tag: tagName }));
-    await refreshAfterMutation();
+    if (itemIDs.length === 1) {
+      selectedDetails = await api.removeTag(itemIDs[0], tagName);
+      showToast(translate("tagRemoved", { tag: tagName }));
+    } else {
+      const result = await api.removeTags(itemIDs, tagName);
+      showToast(
+        translate("batchTagRemoved", {
+          tag: result.tagName,
+          count: result.affectedItems,
+        }),
+      );
+    }
+    await refreshAfterMutation(itemIDs);
   } catch (error) {
     showError(error);
   }
 }
 
-async function refreshAfterMutation(): Promise<void> {
+async function refreshAfterMutation(preserveIDs: number[]): Promise<void> {
   if (!api) return;
-  const preserveID = selectedItemID;
   const savedScope = currentScope;
   const savedQuery = element<HTMLInputElement>("item-search").value.trim();
   api.invalidate();
@@ -1858,19 +2201,15 @@ async function refreshAfterMutation(): Promise<void> {
     allItems = items;
     populateItemFilterOptions();
     applyItemFilters();
-    if (preserveID && items.some((item) => item.id === preserveID)) {
-      await selectItem(preserveID);
-    } else {
-      selectedItemID = null;
-      resetInspector();
-    }
+    await restoreItemSelection(preserveIDs);
   } else if (savedQuery) {
-    await searchWholeLibrary(savedQuery, preserveID);
+    await searchWholeLibrary(savedQuery, preserveIDs);
   }
 }
 
 function updateTagAutocomplete(): void {
-  if (!overview || !selectedDetails) return;
+  const itemIDs = getSelectedItemIDs();
+  if (!overview || !itemIDs.length) return;
   const input = element<HTMLInputElement>("quick-tag-add");
   const query = normalize(input.value);
   if (!query) {
@@ -1878,7 +2217,12 @@ function updateTagAutocomplete(): void {
     return;
   }
 
-  const assigned = new Set(selectedDetails.tags.map((tag) => tag.name));
+  const selectedItems = visibleItems.filter((item) =>
+    selectedItemIDs.has(item.id),
+  );
+  const assigned = new Set(
+    commonTagsForItems(selectedItems).map((tag) => tag.name),
+  );
   autocompleteMatches = overview.tags
     .filter(
       (tag) => !assigned.has(tag.name) && normalize(tag.name).includes(query),
@@ -1932,24 +2276,49 @@ function handleAutocompleteKeyboard(event: KeyboardEvent): void {
   }
 }
 
-async function copySelected(kind: CopyKind): Promise<void> {
-  if (!api || !selectedItemID) return;
-  const styleID = element<HTMLSelectElement>("citation-style").value;
+async function copySelected(
+  kind: CopyKind,
+  styleOverride?: string,
+): Promise<void> {
+  if (!api) return;
+  const itemIDs = getSelectedItemIDs();
+  if (!itemIDs.length) return;
+  const styleID =
+    styleOverride || element<HTMLSelectElement>("citation-style").value;
   const useZettlrFormat =
     kind === "citekey" &&
     element<HTMLInputElement>("zettlr-citation-format").checked;
   try {
-    await api.copyMetadata(selectedItemID, kind, styleID, useZettlrFormat);
-    showToast(
-      translate(
-        kind === "citekey"
+    const result = await api.copyMetadata(
+      itemIDs,
+      kind,
+      styleID,
+      useZettlrFormat,
+    );
+    if (kind === "citekey" && result.missingCitekeys) {
+      showToast(
+        translate("copiedCitekeysWithMissing", {
+          count: result.copiedItems,
+          missing: result.missingCitekeys,
+        }),
+      );
+      return;
+    }
+    const message = translate(
+      styleOverride === APA_STYLE_ID
+        ? "copiedAPA"
+        : kind === "citekey"
           ? useZettlrFormat
             ? "copiedZettlrCitation"
             : "copiedCitekey"
           : kind === "citation"
             ? "copiedCitation"
             : "copiedBibliography",
-      ),
+    );
+    showToast(
+      result.copiedItems > 1
+        ? `${message} · ${translate("copiedItems", { count: result.copiedItems })}`
+        : message,
     );
   } catch (error) {
     showError(error);
@@ -1994,6 +2363,20 @@ function handleTagListKeyboard(event: KeyboardEvent): void {
 
 function handleItemListKeyboard(event: KeyboardEvent): void {
   if (!visibleItems.length) return;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+    event.preventDefault();
+    selectAllVisibleItems();
+    return;
+  }
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    (event.key === " " || event.key === "Spacebar") &&
+    selectedItemID
+  ) {
+    event.preventDefault();
+    updateItemSelection(selectedItemID, event, true);
+    return;
+  }
   const activeIndex = visibleItems.findIndex(
     (item) => item.id === selectedItemID,
   );
@@ -2007,7 +2390,7 @@ function handleItemListKeyboard(event: KeyboardEvent): void {
 
   event.preventDefault();
   itemVirtualList.scrollToIndex(nextIndex);
-  void selectItem(visibleItems[nextIndex].id);
+  updateItemSelection(visibleItems[nextIndex].id, event, false);
 }
 
 function handleGlobalKeyboard(event: KeyboardEvent): void {
@@ -2026,7 +2409,11 @@ function handleGlobalKeyboard(event: KeyboardEvent): void {
     return;
   }
 
-  if (!isEditing && event.key.toLocaleLowerCase() === "c" && selectedItemID) {
+  if (
+    !isEditing &&
+    event.key.toLocaleLowerCase() === "c" &&
+    selectedItemIDs.size
+  ) {
     event.preventDefault();
     void copySelected("citekey");
   }
@@ -2040,6 +2427,7 @@ function handleGlobalKeyboard(event: KeyboardEvent): void {
   }
 
   if (event.key === "Escape") {
+    if (selectedItemIDs.size > 1) clearItemSelection();
     closeAutocomplete();
     closeTagActionsMenu();
   }
@@ -2093,6 +2481,7 @@ function resetItemView(): void {
   setItemControlsEnabled(false);
   showItemsEmpty("searchLibraryTitle", "searchLibraryBody");
   itemVirtualList.setItems([]);
+  updateSelectionControls();
 }
 
 function showItemsEmpty(titleKey: string, bodyKey: string): void {
@@ -2111,6 +2500,7 @@ function showItemsEmpty(titleKey: string, bodyKey: string): void {
 function resetInspector(): void {
   selectedDetails = null;
   frequentTagCandidates = [];
+  element("inspector-heading-title").textContent = translate("itemDetails");
   element("inspector-empty").hidden = false;
   element("inspector-empty").querySelector("p")!.textContent =
     translate("selectItem");
@@ -2165,7 +2555,7 @@ function setLoading(loading: boolean, messageKey = "loadingLibrary"): void {
 async function refreshCurrentView(): Promise<void> {
   if (!api || !currentLibraryID) return;
   const savedScope = currentScope;
-  const savedSelectedID = selectedItemID;
+  const savedSelectedIDs = getSelectedItemIDs();
   const savedQuery = element<HTMLInputElement>("item-search").value.trim();
   setLoading(true, "loadingLibrary");
   hideError();
@@ -2178,15 +2568,10 @@ async function refreshCurrentView(): Promise<void> {
       currentScope = savedScope;
       populateItemFilterOptions();
       applyItemFilters();
-      if (
-        savedSelectedID &&
-        allItems.some((item) => item.id === savedSelectedID)
-      ) {
-        await selectItem(savedSelectedID);
-      }
+      await restoreItemSelection(savedSelectedIDs);
     } else if (savedQuery) {
       currentScope = null;
-      await searchWholeLibrary(savedQuery, savedSelectedID);
+      await searchWholeLibrary(savedQuery, savedSelectedIDs);
     } else {
       enterLibrarySearch();
     }

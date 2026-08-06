@@ -297,9 +297,22 @@
             </p>
           </div>
 
-          <div id="items-table" class="items-table" role="table" hidden>
+          <div
+            id="items-table"
+            class="items-table"
+            role="grid"
+            aria-multiselectable="true"
+            hidden
+          >
             <div id="items-header" class="table-header" role="row">
-              <span class="type-column" role="columnheader"></span>
+              <span class="type-column selection-column" role="columnheader">
+                <input
+                  id="select-visible-items"
+                  type="checkbox"
+                  data-i18n-title="selectAllVisible"
+                  aria-label="Select all visible items"
+                />
+              </span>
               <div
                 class="column-header title-column"
                 data-column="title"
@@ -440,7 +453,9 @@
           aria-label="Inspector"
         >
           <div class="pane-heading inspector-heading">
-            <h1 data-i18n="itemDetails">Item details</h1>
+            <h1 id="inspector-heading-title" data-i18n="itemDetails">
+              Item details
+            </h1>
             <button
               id="inspector-close"
               class="icon-button compact"
@@ -474,7 +489,7 @@
                   <p id="detail-byline"></p>
                 </div>
               </div>
-              <div class="item-action-row">
+              <div id="item-action-row" class="item-action-row">
                 <button id="show-in-zotero" type="button">
                   <img
                     class="icon"
@@ -494,7 +509,7 @@
               </div>
             </section>
 
-            <details class="inspector-section" open>
+            <details id="item-info-section" class="inspector-section" open>
               <summary data-i18n="info">Info</summary>
               <dl class="metadata-grid">
                 <dt data-i18n="itemType">Item type</dt>
@@ -510,9 +525,9 @@
               </dl>
             </details>
 
-            <details class="inspector-section" open>
+            <details id="item-tags-section" class="inspector-section" open>
               <summary>
-                <span data-i18n="tags">Tags</span>
+                <span id="item-tags-heading" data-i18n="tags">Tags</span>
                 <span id="detail-tag-count" class="section-count">0</span>
               </summary>
               <div id="detail-tags" class="tag-chip-list"></div>
@@ -589,6 +604,9 @@
                   data-i18n="copyBibliography"
                 >
                   Copy bibliography
+                </button>
+                <button id="copy-apa" type="button" data-i18n="copyAPA">
+                  Copy APA references
                 </button>
               </div>
             </details>
