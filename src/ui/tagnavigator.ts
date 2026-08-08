@@ -807,8 +807,10 @@ function bindEvents(): void {
   });
   document.addEventListener("pointerdown", (event) => {
     const target = event.target as Node;
+    const menu = element("tag-actions-menu");
     if (
-      !element("tag-actions-menu").contains(target) &&
+      !menu.hidden &&
+      !menu.contains(target) &&
       !element("tag-actions-button").contains(target)
     ) {
       closeTagActionsMenu();

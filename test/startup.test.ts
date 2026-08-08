@@ -5,6 +5,7 @@ import {
   formatCitekeysForZettlr,
   TagNavigatorService,
 } from "../src/modules/tagNavigatorService";
+import { TagNavigator } from "../src/modules/tagnavigator";
 import type { ItemSummary } from "../src/types/tagNavigator";
 import {
   completeItemColumnWidths,
@@ -130,6 +131,132 @@ describe("startup", function () {
         ),
       );
     } finally {
+      for (const item of items) await item.eraseTx();
+    }
+  });
+
+  it("should merge one existing tag into another", async function () {
+    this.timeout(15000);
+    const suffix = Date.now();
+    const sourceTag = `TagNavigator merge source ${suffix}`;
+    const targetTag = `TagNavigator merge target ${suffix}`;
+    const items = [new Zotero.Item("book"), new Zotero.Item("journalArticle")];
+
+    for (const [index, item] of items.entries()) {
+      item.libraryID = Zotero.Libraries.userLibraryID;
+      item.setField("title", `TagNavigator merge item ${index + 1}`);
+      item.addTag(sourceTag, 0);
+      if (index === 1) item.addTag(targetTag, 0);
+      await item.saveTx();
+    }
+
+    try {
+      const service = new TagNavigatorService();
+      const result = await service.mergeTags(
+        Zotero.Libraries.userLibraryID,
+        sourceTag,
+        targetTag,
+      );
+
+      assert.deepEqual(result, {
+        action: "merge",
+        sourceName: sourceTag,
+        targetName: targetTag,
+        affectedItems: 2,
+      });
+      assert.isTrue(items.every((item) => item.hasTag(targetTag)));
+      assert.isTrue(items.every((item) => !item.hasTag(sourceTag)));
+    } finally {
+      for (const item of items) await item.eraseTx();
+    }
+  });
+
+  it("should merge tags through the floating-window controls", async function () {
+    this.timeout(20000);
+    const suffix = Date.now();
+    const sourceTag = `TagNavigator UI merge source ${suffix}`;
+    const targetTag = `TagNavigator UI merge target ${suffix}`;
+    const items = [new Zotero.Item("book"), new Zotero.Item("journalArticle")];
+
+    for (const [index, item] of items.entries()) {
+      item.libraryID = Zotero.Libraries.userLibraryID;
+      item.setField("title", `TagNavigator UI merge item ${index + 1}`);
+      item.addTag(sourceTag, 0);
+      if (index === 1) item.addTag(targetTag, 0);
+      await item.saveTx();
+    }
+
+    const waitFor = async (predicate: () => boolean) => {
+      const deadline = Date.now() + 10000;
+      while (!predicate()) {
+        if (Date.now() > deadline) throw new Error("Timed out waiting for UI");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    };
+
+    try {
+      TagNavigator.openWindow();
+      const win = (TagNavigator as any).openedWindow as Window;
+      await waitFor(
+        () =>
+          win.document.readyState === "complete" &&
+          win.document.getElementById("app")?.getAttribute("aria-busy") ===
+            "false",
+      );
+
+      const search = win.document.getElementById(
+        "tag-search",
+      ) as HTMLInputElement;
+      search.value = sourceTag;
+      search.dispatchEvent(new win.Event("input", { bubbles: true }));
+      await waitFor(() =>
+        Array.from(win.document.querySelectorAll(".tag-name")).some(
+          (node) => node.textContent === sourceTag,
+        ),
+      );
+      const sourceRow = Array.from(
+        win.document.querySelectorAll<HTMLElement>(".tag-row"),
+      ).find(
+        (row) => row.querySelector(".tag-name")?.textContent === sourceTag,
+      );
+      assert.exists(sourceRow);
+      sourceRow!.click();
+
+      const actions = win.document.getElementById(
+        "tag-actions-button",
+      ) as HTMLButtonElement;
+      await waitFor(() => !actions.disabled);
+      actions.click();
+      const merge = win.document.querySelector(
+        '[data-tag-action="merge"]',
+      ) as HTMLButtonElement;
+      merge.click();
+
+      const dialog = win.document.getElementById(
+        "tag-action-dialog",
+      ) as HTMLDialogElement;
+      await waitFor(() => dialog.open);
+      const target = win.document.getElementById(
+        "tag-action-target",
+      ) as HTMLInputElement;
+      target.dispatchEvent(
+        new win.MouseEvent("pointerdown", { bubbles: true }),
+      );
+      target.value = targetTag;
+      target.dispatchEvent(new win.Event("input", { bubbles: true }));
+      const confirm = win.document.getElementById(
+        "tag-action-confirm",
+      ) as HTMLButtonElement;
+      confirm.dispatchEvent(
+        new win.MouseEvent("pointerdown", { bubbles: true }),
+      );
+      confirm.click();
+
+      await waitFor(() => items.every((item) => item.hasTag(targetTag)));
+      assert.isFalse(dialog.open);
+      assert.isTrue(items.every((item) => !item.hasTag(sourceTag)));
+    } finally {
+      TagNavigator.stop();
       for (const item of items) await item.eraseTx();
     }
   });
