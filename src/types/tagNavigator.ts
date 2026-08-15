@@ -26,6 +26,21 @@ export interface TagOverview {
 
 export type ItemScope = { kind: "tag"; tagName: string } | { kind: "untagged" };
 
+export interface SavedFilterPreset {
+  id: string;
+  name: string;
+  scope: ItemScope;
+  query: string;
+  author: string;
+  secondTag: string;
+  yearMin: string;
+  yearMax: string;
+  hasPDF: boolean;
+  hasNotes: boolean;
+}
+
+export type SavedFiltersByLibrary = Record<string, SavedFilterPreset[]>;
+
 export interface ItemTag {
   name: string;
   type: 0 | 1;
@@ -89,6 +104,7 @@ export interface NavigatorPreferences {
   inspectorOpen: boolean;
   zettlrCitationFormat: boolean;
   itemColumnWidths: Partial<ItemColumnWidths>;
+  savedFilters: SavedFiltersByLibrary;
 }
 
 export interface NavigatorBootstrap {

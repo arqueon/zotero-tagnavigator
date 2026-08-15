@@ -19,6 +19,7 @@ import type {
   ZettlrCitationStyle,
 } from "../types/tagNavigator";
 import { sanitizeItemColumnWidths } from "../utils/itemColumns";
+import { sanitizeSavedFilters } from "../utils/savedFilters";
 
 type TagAggregateRow = {
   name: string;
@@ -526,6 +527,10 @@ export class TagNavigatorService implements TagNavigatorAPI {
         this.setPref("itemColumnWidths", JSON.stringify(widths));
       }
     }
+    if (preferences.savedFilters) {
+      const savedFilters = sanitizeSavedFilters(preferences.savedFilters);
+      this.setPref("savedFilters", JSON.stringify(savedFilters));
+    }
   }
 
   invalidate(): void {
@@ -594,7 +599,18 @@ export class TagNavigatorService implements TagNavigatorAPI {
       inspectorOpen: this.getPref("inspectorOpen") !== false,
       zettlrCitationFormat: this.getPref("zettlrCitationFormat") === true,
       itemColumnWidths: this.getItemColumnWidths(),
+      savedFilters: this.getSavedFilters(),
     };
+  }
+
+  private getSavedFilters(): NavigatorPreferences["savedFilters"] {
+    const saved = this.getPref("savedFilters");
+    if (typeof saved !== "string" || !saved.trim()) return {};
+    try {
+      return sanitizeSavedFilters(JSON.parse(saved));
+    } catch {
+      return {};
+    }
   }
 
   private getItemColumnWidths(): NavigatorPreferences["itemColumnWidths"] {

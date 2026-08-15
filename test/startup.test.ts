@@ -13,6 +13,11 @@ import {
 } from "../src/utils/itemColumns";
 import { formatItemTimestamp } from "../src/utils/itemDate";
 import { compareItemSummaries } from "../src/utils/itemSort";
+import { sanitizeSavedFilters } from "../src/utils/savedFilters";
+import {
+  hasZoteroItemDrag,
+  parseZoteroItemDrop,
+} from "../src/utils/zoteroDrag";
 
 describe("startup", function () {
   it("should have plugin instance defined", function () {
@@ -62,6 +67,47 @@ describe("startup", function () {
     assert.isArray(bootstrap.citationStyles);
     assert.isBoolean(bootstrap.zettlrCitationFormat.available);
     assert.isObject(bootstrap.preferences.itemColumnWidths);
+    assert.isObject(bootstrap.preferences.savedFilters);
+  });
+
+  it("should parse Zotero's native multi-item drag payload", function () {
+    assert.deepEqual(parseZoteroItemDrop("42, 7,42,invalid,-3"), [42, 7]);
+    assert.isTrue(hasZoteroItemDrag(["text/plain", "zotero/item"]));
+    assert.isFalse(hasZoteroItemDrag(["text/plain"]));
+  });
+
+  it("should sanitize saved filters per library", function () {
+    assert.deepEqual(
+      sanitizeSavedFilters({
+        1: [
+          {
+            id: "reading",
+            name: "Reading queue",
+            scope: { kind: "tag", tagName: "to-read" },
+            query: "paper",
+            secondTag: "methods",
+            hasPDF: true,
+          },
+        ],
+        invalid: [{ id: "ignored" }],
+      }),
+      {
+        1: [
+          {
+            id: "reading",
+            name: "Reading queue",
+            scope: { kind: "tag", tagName: "to-read" },
+            query: "paper",
+            author: "",
+            secondTag: "methods",
+            yearMin: "",
+            yearMax: "",
+            hasPDF: true,
+            hasNotes: false,
+          },
+        ],
+      },
+    );
   });
 
   it("should mirror Zettlr's three citation insertion formats", function () {

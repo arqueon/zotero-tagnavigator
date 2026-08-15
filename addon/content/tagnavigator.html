@@ -237,6 +237,32 @@
           </div>
 
           <div id="filters-bar" class="filters-bar" hidden>
+            <div class="saved-filter-controls">
+              <select
+                id="saved-filter-select"
+                data-i18n-title="savedFilters"
+                aria-label="Saved views"
+                disabled
+              >
+                <option value="" data-i18n="savedFilters">Saved views</option>
+              </select>
+              <button
+                id="saved-filter-save"
+                class="text-button"
+                type="button"
+                disabled
+              >
+                <span data-i18n="saveView">Save view</span>
+              </button>
+              <button
+                id="saved-filter-delete"
+                class="text-button"
+                type="button"
+                disabled
+              >
+                <span data-i18n="deleteView">Delete view</span>
+              </button>
+            </div>
             <label>
               <span data-i18n="author">Author</span>
               <select id="author-filter" disabled>

@@ -6,6 +6,8 @@ import type {
   ItemScope,
   ItemSummary,
   NavigatorBootstrap,
+  SavedFilterPreset,
+  SavedFiltersByLibrary,
   TagNavigatorAPI,
   TagMutationResult,
   TagOverview,
@@ -24,6 +26,11 @@ import {
   type ItemSortDirection,
   type ItemSortKey,
 } from "../utils/itemSort";
+import {
+  hasZoteroItemDrag,
+  parseZoteroItemDrop,
+  ZOTERO_ITEM_DRAG_TYPE,
+} from "../utils/zoteroDrag";
 
 // The plugin sandbox typings intentionally omit browser globals, while this
 // entry point runs inside the standalone chrome HTML window.
@@ -75,6 +82,17 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     hasPDF: "Has PDF",
     hasNotes: "Has notes",
     clearFilters: "Clear filters",
+    savedFilters: "Saved views",
+    saveView: "Save view",
+    deleteView: "Delete view",
+    savedFilterName: "Name this saved view",
+    savedFilterSaved: "Saved view: {name}",
+    savedFilterDeleted: "Deleted saved view: {name}",
+    savedFilterMissingTag:
+      "This saved view references a tag that no longer exists: {tag}",
+    savedFilterNeedsTag: "Choose a primary tag before saving this view.",
+    dropTagHint: "Drop Zotero items to add this tag",
+    dropTagApplied: "Added “{tag}” to {count} items",
     searchLibrary: "Search the whole library",
     searchLibraryTitle: "Search the whole library",
     searchLibraryBody:
@@ -217,6 +235,18 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     hasPDF: "Con PDF",
     hasNotes: "Con notas",
     clearFilters: "Limpiar filtros",
+    savedFilters: "Vistas guardadas",
+    saveView: "Guardar vista",
+    deleteView: "Eliminar vista",
+    savedFilterName: "Nombre de la vista guardada",
+    savedFilterSaved: "Vista guardada: {name}",
+    savedFilterDeleted: "Vista guardada eliminada: {name}",
+    savedFilterMissingTag:
+      "Esta vista guardada usa una etiqueta que ya no existe: {tag}",
+    savedFilterNeedsTag:
+      "Elige una etiqueta principal antes de guardar esta vista.",
+    dropTagHint: "Suelta ítems de Zotero para añadir esta etiqueta",
+    dropTagApplied: "Se añadió «{tag}» a {count} ítems",
     searchLibrary: "Buscar en toda la biblioteca",
     searchLibraryTitle: "Busca en toda la biblioteca",
     searchLibraryBody:
@@ -452,6 +482,8 @@ let tagActionMode: TagActionMode | null = null;
 let tagActionSource: TagSummary | null = null;
 let tagActionAutocompleteMatches: TagSummary[] = [];
 let tagActionAutocompleteIndex = -1;
+let savedFilters: SavedFiltersByLibrary = {};
+let applyingSavedFilter = false;
 
 let tagVirtualList: VirtualList<TagListEntry>;
 let itemVirtualList: VirtualList<ItemSummary>;
@@ -546,6 +578,7 @@ async function init(): Promise<void> {
     configureItemColumns();
     configureStaticControls();
     configureZettlrCitationFormat();
+    savedFilters = { ...bootstrap.preferences.savedFilters };
     populateLibraries();
     populateCitationStyles();
     setInspectorOpen(bootstrap.preferences.inspectorOpen, false);
@@ -834,10 +867,26 @@ function bindEvents(): void {
     "filter-has-pdf",
     "filter-has-notes",
   ]) {
-    element(id).addEventListener("input", applyItemFilters);
-    element(id).addEventListener("change", applyItemFilters);
+    element(id).addEventListener("input", () => {
+      markSavedFilterDirty();
+      applyItemFilters();
+    });
+    element(id).addEventListener("change", () => {
+      markSavedFilterDirty();
+      applyItemFilters();
+    });
   }
   element("clear-filters").addEventListener("click", clearFilters);
+  element<HTMLSelectElement>("saved-filter-select").addEventListener(
+    "change",
+    (event) => {
+      const presetID = (event.currentTarget as HTMLSelectElement).value;
+      updateSavedFilterButtons();
+      if (presetID) void applySavedFilter(presetID);
+    },
+  );
+  element("saved-filter-save").addEventListener("click", saveCurrentFilter);
+  element("saved-filter-delete").addEventListener("click", deleteSavedFilter);
 
   document
     .querySelectorAll<HTMLButtonElement>("[data-sort]")
@@ -967,6 +1016,7 @@ async function loadLibrary(libraryID: number): Promise<void> {
     element<HTMLSelectElement>("library-select").value = String(libraryID);
     api.savePreferences({ selectedLibraryID: libraryID });
     updateTagRows();
+    populateSavedFilterSelect();
     enterLibrarySearch();
     const library = bootstrap.libraries.find((entry) => entry.id === libraryID);
     element("library-status").textContent = library
@@ -1067,7 +1117,57 @@ function renderTagRow(entry: TagListEntry): HTMLElement {
   if (scopesEqual(entry.scope, currentScope)) {
     row.title = `${entry.label}\n${translate("deselectTag")}`;
   }
+  if (entry.scope.kind === "tag" && isCurrentLibraryEditable()) {
+    const dropTagName = entry.scope.tagName;
+    row.title += `\n${translate("dropTagHint")}`;
+    row.addEventListener("dragover", (rawEvent) => {
+      const event = rawEvent as DragEvent;
+      if (!event.dataTransfer || !hasZoteroItemDrag(event.dataTransfer.types))
+        return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      row.classList.add("drop-target");
+    });
+    row.addEventListener("dragleave", (rawEvent) => {
+      const event = rawEvent as DragEvent;
+      if (!row.contains(event.relatedTarget as Node | null))
+        row.classList.remove("drop-target");
+    });
+    row.addEventListener("drop", (rawEvent) => {
+      const event = rawEvent as DragEvent;
+      row.classList.remove("drop-target");
+      if (!event.dataTransfer) return;
+      const itemIDs = parseZoteroItemDrop(
+        event.dataTransfer.getData(ZOTERO_ITEM_DRAG_TYPE),
+      );
+      if (!itemIDs.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void addDroppedItemsToTag(itemIDs, dropTagName);
+    });
+  }
   return row;
+}
+
+async function addDroppedItemsToTag(
+  itemIDs: number[],
+  tagName: string,
+): Promise<void> {
+  if (!api || !isCurrentLibraryEditable()) return;
+  const preserveIDs = getSelectedItemIDs();
+  try {
+    suppressNotificationsUntil = Date.now() + 1200;
+    const result = await api.addTags(itemIDs, tagName);
+    showToast(
+      translate("dropTagApplied", {
+        tag: result.tagName,
+        count: result.affectedItems,
+      }),
+    );
+    await refreshAfterMutation(preserveIDs);
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function selectedTagSummary(): TagSummary | null {
@@ -1338,6 +1438,7 @@ async function refreshAfterBulkTagMutation(
 
 async function selectScope(scope: ItemScope): Promise<void> {
   if (!api || !overview) return;
+  if (!applyingSavedFilter) clearSavedFilterSelection();
   const token = ++itemLoadToken;
   currentScope = scope;
   selectedItemID = null;
@@ -1462,6 +1563,7 @@ function createOption(value: string, label: string): HTMLOptionElement {
 }
 
 function handleItemSearchInput(): void {
+  markSavedFilterDirty();
   const input = element<HTMLInputElement>("item-search");
   input.parentElement
     ?.querySelector("button")
@@ -2442,6 +2544,155 @@ function toggleFilters(): void {
   button.setAttribute("aria-expanded", String(!bar.hidden));
 }
 
+function librarySavedFilters(): SavedFilterPreset[] {
+  return savedFilters[String(currentLibraryID)] || [];
+}
+
+function populateSavedFilterSelect(selectedID = ""): void {
+  const select = element<HTMLSelectElement>("saved-filter-select");
+  const presets = librarySavedFilters()
+    .slice()
+    .sort((left, right) => left.name.localeCompare(right.name, language));
+  select.replaceChildren(createOption("", translate("savedFilters")));
+  for (const preset of presets) {
+    select.appendChild(createOption(preset.id, preset.name));
+  }
+  select.disabled = presets.length === 0;
+  select.value = presets.some((preset) => preset.id === selectedID)
+    ? selectedID
+    : "";
+  updateSavedFilterButtons();
+}
+
+function updateSavedFilterButtons(): void {
+  const selectedID = element<HTMLSelectElement>("saved-filter-select").value;
+  element<HTMLButtonElement>("saved-filter-save").disabled =
+    !currentScope || element<HTMLInputElement>("item-search").disabled;
+  element<HTMLButtonElement>("saved-filter-delete").disabled = !selectedID;
+}
+
+function clearSavedFilterSelection(): void {
+  const select = element<HTMLSelectElement>("saved-filter-select");
+  select.value = "";
+  updateSavedFilterButtons();
+}
+
+function markSavedFilterDirty(): void {
+  if (!applyingSavedFilter) clearSavedFilterSelection();
+}
+
+function currentFilterPreset(id: string, name: string): SavedFilterPreset {
+  if (!currentScope) throw new Error("SAVED_FILTER_REQUIRES_SCOPE");
+  return {
+    id,
+    name,
+    scope: currentScope,
+    query: element<HTMLInputElement>("item-search").value.trim(),
+    author: element<HTMLSelectElement>("author-filter").value,
+    secondTag: element<HTMLSelectElement>("second-tag-filter").value,
+    yearMin: element<HTMLInputElement>("year-min").value,
+    yearMax: element<HTMLInputElement>("year-max").value,
+    hasPDF: element<HTMLInputElement>("filter-has-pdf").checked,
+    hasNotes: element<HTMLInputElement>("filter-has-notes").checked,
+  };
+}
+
+function saveCurrentFilter(): void {
+  if (!api || !currentScope) {
+    showToast(translate("savedFilterNeedsTag"), true);
+    return;
+  }
+  const select = element<HTMLSelectElement>("saved-filter-select");
+  const presets = librarySavedFilters().slice();
+  const existing = presets.find((preset) => preset.id === select.value);
+  const proposed = window.prompt(
+    translate("savedFilterName"),
+    existing?.name || scopeLabel(currentScope),
+  );
+  const name = String(proposed || "").trim();
+  if (!name) return;
+  const id =
+    existing?.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const preset = currentFilterPreset(id, name);
+  const index = presets.findIndex((entry) => entry.id === id);
+  if (index >= 0) presets[index] = preset;
+  else presets.push(preset);
+  savedFilters = { ...savedFilters, [String(currentLibraryID)]: presets };
+  api.savePreferences({ savedFilters });
+  populateSavedFilterSelect(id);
+  showToast(translate("savedFilterSaved", { name }));
+}
+
+function deleteSavedFilter(): void {
+  const select = element<HTMLSelectElement>("saved-filter-select");
+  const current = librarySavedFilters().find(
+    (preset) => preset.id === select.value,
+  );
+  if (!api || !current) return;
+  const presets = librarySavedFilters().filter(
+    (preset) => preset.id !== current.id,
+  );
+  const next = { ...savedFilters };
+  if (presets.length) next[String(currentLibraryID)] = presets;
+  else delete next[String(currentLibraryID)];
+  savedFilters = next;
+  api.savePreferences({ savedFilters });
+  populateSavedFilterSelect();
+  showToast(translate("savedFilterDeleted", { name: current.name }));
+}
+
+async function applySavedFilter(presetID: string): Promise<void> {
+  const preset = librarySavedFilters().find((entry) => entry.id === presetID);
+  if (!preset || !overview) return;
+  const availableTags = new Set(overview.tags.map((tag) => tag.name));
+  const missingTag =
+    preset.scope.kind === "tag" && !availableTags.has(preset.scope.tagName)
+      ? preset.scope.tagName
+      : preset.secondTag && !availableTags.has(preset.secondTag)
+        ? preset.secondTag
+        : "";
+  if (missingTag) {
+    showToast(translate("savedFilterMissingTag", { tag: missingTag }), true);
+    return;
+  }
+
+  applyingSavedFilter = true;
+  try {
+    await selectScope(preset.scope);
+    const author = element<HTMLSelectElement>("author-filter");
+    const secondTag = element<HTMLSelectElement>("second-tag-filter");
+    if (
+      preset.author &&
+      !Array.from(author.options as unknown as HTMLOptionElement[]).some(
+        (option) => option.value === preset.author,
+      )
+    )
+      author.appendChild(createOption(preset.author, preset.author));
+    if (
+      preset.secondTag &&
+      !Array.from(secondTag.options as unknown as HTMLOptionElement[]).some(
+        (option) => option.value === preset.secondTag,
+      )
+    )
+      secondTag.appendChild(createOption(preset.secondTag, preset.secondTag));
+    element<HTMLInputElement>("item-search").value = preset.query;
+    author.value = preset.author;
+    secondTag.value = preset.secondTag;
+    element<HTMLInputElement>("year-min").value = preset.yearMin;
+    element<HTMLInputElement>("year-max").value = preset.yearMax;
+    element<HTMLInputElement>("filter-has-pdf").checked = preset.hasPDF;
+    element<HTMLInputElement>("filter-has-notes").checked = preset.hasNotes;
+    const bar = element("filters-bar");
+    bar.hidden = false;
+    element("filters-toggle").setAttribute("aria-expanded", "true");
+    applyItemFilters();
+    element<HTMLSelectElement>("saved-filter-select").value = preset.id;
+  } finally {
+    applyingSavedFilter = false;
+    updateSavedFilterButtons();
+  }
+}
+
 function resetFilters(): void {
   element<HTMLInputElement>("item-search").value = "";
   element<HTMLSelectElement>("author-filter").value = "";
@@ -2454,6 +2705,7 @@ function resetFilters(): void {
 }
 
 function clearFilters(): void {
+  markSavedFilterDirty();
   resetFilters();
   if (currentScope) applyItemFilters();
   else handleItemSearchInput();
@@ -2530,6 +2782,7 @@ function setResultFilterControlsEnabled(enabled: boolean): void {
   }
   if (!enabled) element<HTMLButtonElement>("clear-filters").disabled = true;
   else updateActiveFilterCount();
+  updateSavedFilterButtons();
 }
 
 function setInspectorOpen(open: boolean, persist: boolean): void {

@@ -25,6 +25,9 @@ designed to remain responsive with large personal and group libraries.
 - **Focused tag exploration.** Select a tag and refine its items by text,
   creator, year, PDF availability, notes, or a second intersecting tag. Click
   the active tag again, or press `Esc`, to return to whole-library search.
+- **Saved filter views.** Name and restore useful combinations of a primary
+  tag, intersecting tag, author, year range, text, PDF, and note filters. Views
+  stay scoped to their library and report tags that no longer exist.
 - **Resizable, sortable result columns.** Drag any result-header divider to
   persist its width, or double-click it to reset. Zotero's date added and date
   modified appear as compact local dates, retain the full timestamp in a
@@ -40,6 +43,9 @@ designed to remain responsive with large personal and group libraries.
 - **Batch tagging.** Add a tag to every selected item or remove a shared tag
   from the whole selection in one Zotero transaction. `Ctrl+1` through
   `Ctrl+5` still applies frequently used manual tags.
+- **Native drag-and-drop tagging.** Drag one or several items from Zotero's
+  library onto a manual tag row. TagNavigator validates the active library and
+  applies the tag through the same transactional batch API.
 - **Academic Quick Copy.** Copy CiteKeys, a formatted citation, a bibliography,
   or APA references for the complete selection through Zotero's CSL engine.
 - **Zettlr-ready citations.** Enable **Zettlr citation format** next to CiteKey
