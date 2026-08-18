@@ -12,6 +12,7 @@ declare namespace _ZoteroTypes {
       "inspectorOpen": boolean;
       "zettlrCitationFormat": boolean;
       "itemColumnWidths": string;
+      "savedFilters": string;
       "input": string;
     };
   }

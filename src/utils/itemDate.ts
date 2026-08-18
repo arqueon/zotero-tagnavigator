@@ -58,3 +58,14 @@ export function formatItemTimestamp(
     }),
   };
 }
+
+export function isItemTimestampInRange(
+  value: string,
+  from: string,
+  to: string,
+): boolean {
+  if (!from && !to) return true;
+  const date = /^(\d{4}-\d{2}-\d{2})(?:[ T]|$)/.exec(value.trim())?.[1];
+  if (!date) return false;
+  return (!from || date >= from) && (!to || date <= to);
+}

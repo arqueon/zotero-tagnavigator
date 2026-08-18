@@ -130,6 +130,7 @@ select:focus-visible,
 input[type="text"],
 input[type="search"],
 input[type="number"],
+input[type="date"],
 select {
   min-height: 28px;
   padding: 3px 7px;
@@ -487,6 +488,13 @@ input::placeholder {
   color: var(--tn-accent-text);
 }
 
+.tag-row.drop-target {
+  outline: 2px solid var(--tn-accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--tn-accent) 18%, var(--tn-sidepane));
+  color: var(--tn-text);
+}
+
 .tag-row .tag-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -618,44 +626,97 @@ input::placeholder {
   gap: 8px;
   min-height: 56px;
   padding: 6px 8px;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   background: var(--tn-sidepane);
   border-bottom: 1px solid var(--tn-divider);
 }
 
-.filters-bar > label:not(.check-row) {
+.filter-field {
   display: grid;
   gap: 2px;
-  min-width: 130px;
-  flex: 1 1 150px;
+  min-width: 120px;
+  flex: 1 1 135px;
+}
+
+.saved-filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  flex: 1 1 100%;
+}
+
+.saved-filter-controls select {
+  width: min(240px, 45vw);
+}
+
+.filters-bar select,
+.year-range-controls input,
+.date-fieldset input {
+  height: 29px;
+  min-height: 29px;
+}
+
+.filters-bar select,
+.filters-bar input {
+  margin: 0;
 }
 
 .filters-bar label > span,
-.year-fieldset legend,
+.filter-label,
+.date-fieldset legend,
 .field-label,
 .stacked-field > span {
   color: var(--tn-text-secondary);
   font-size: 11px;
 }
 
-.year-fieldset {
+.year-field {
+  min-width: 154px;
+  flex: 0 1 154px;
+}
+
+.year-range-controls {
   display: grid;
   grid-template-columns: 68px auto 68px;
   align-items: center;
   gap: 4px;
-  min-width: 154px;
+}
+
+.year-range-controls input {
+  width: 68px;
+}
+
+.date-filter-row {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+}
+
+.date-fieldset {
+  display: grid;
+  grid-template-columns: minmax(108px, 1fr) auto minmax(108px, 1fr);
+  align-items: center;
+  gap: 4px;
+  min-width: 232px;
   margin: 0;
   padding: 0;
   border: 0;
+  flex: 1 1 250px;
 }
 
-.year-fieldset legend {
+.date-fieldset legend {
   grid-column: 1 / -1;
   padding: 0;
 }
 
-.year-fieldset input {
-  width: 68px;
+.date-fieldset input {
+  width: 100%;
+  min-width: 0;
 }
 
 .compact-check {

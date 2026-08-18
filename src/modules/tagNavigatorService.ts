@@ -19,6 +19,7 @@ import type {
   ZettlrCitationStyle,
 } from "../types/tagNavigator";
 import { sanitizeItemColumnWidths } from "../utils/itemColumns";
+import { sanitizeSavedFilters } from "../utils/savedFilters";
 
 type TagAggregateRow = {
   name: string;
@@ -221,6 +222,42 @@ export class TagNavigatorService implements TagNavigatorAPI {
 
     this.rememberItems(cacheKey, summaries);
     return summaries;
+  }
+
+  /**
+   * Returns a bounded initial view ordered by Zotero's stored modification
+   * timestamp. This keeps opening a large library fast while avoiding an
+   * empty results pane.
+   */
+  async getRecentItems(libraryID: number): Promise<LibrarySearchResult> {
+    this.assertLibrary(libraryID);
+    const itemIDs = await Zotero.DB.columnQueryAsync<number>(
+      `
+        SELECT I.itemID
+        FROM items I
+        JOIN itemTypes ITEMTYPE USING (itemTypeID)
+        LEFT JOIN deletedItems D USING (itemID)
+        WHERE I.libraryID = ?
+          AND D.itemID IS NULL
+          AND ITEMTYPE.typeName NOT IN ('attachment', 'note', 'annotation')
+        ORDER BY I.dateModified DESC, I.itemID DESC
+        LIMIT ?
+      `.trim(),
+      [libraryID, LIBRARY_SEARCH_LIMIT],
+    );
+    const items = itemIDs.length
+      ? await Zotero.Items.getAsync(itemIDs)
+      : ([] as Zotero.Item[]);
+    const summaries = await this.buildItemSummaries(
+      items.filter((item) => item?.isRegularItem()),
+    );
+    const total = (await this.getTagOverview(libraryID)).totalItems;
+
+    return {
+      items: summaries,
+      total,
+      limited: total > summaries.length,
+    };
   }
 
   /**
@@ -526,6 +563,10 @@ export class TagNavigatorService implements TagNavigatorAPI {
         this.setPref("itemColumnWidths", JSON.stringify(widths));
       }
     }
+    if (preferences.savedFilters) {
+      const savedFilters = sanitizeSavedFilters(preferences.savedFilters);
+      this.setPref("savedFilters", JSON.stringify(savedFilters));
+    }
   }
 
   invalidate(): void {
@@ -594,7 +635,18 @@ export class TagNavigatorService implements TagNavigatorAPI {
       inspectorOpen: this.getPref("inspectorOpen") !== false,
       zettlrCitationFormat: this.getPref("zettlrCitationFormat") === true,
       itemColumnWidths: this.getItemColumnWidths(),
+      savedFilters: this.getSavedFilters(),
     };
+  }
+
+  private getSavedFilters(): NavigatorPreferences["savedFilters"] {
+    const saved = this.getPref("savedFilters");
+    if (typeof saved !== "string" || !saved.trim()) return {};
+    try {
+      return sanitizeSavedFilters(JSON.parse(saved));
+    } catch {
+      return {};
+    }
   }
 
   private getItemColumnWidths(): NavigatorPreferences["itemColumnWidths"] {

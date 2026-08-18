@@ -26,6 +26,27 @@ export interface TagOverview {
 
 export type ItemScope = { kind: "tag"; tagName: string } | { kind: "untagged" };
 
+export type SavedFilterScope = ItemScope | { kind: "library" };
+
+export interface SavedFilterPreset {
+  id: string;
+  name: string;
+  scope: SavedFilterScope;
+  query: string;
+  author: string;
+  secondTag: string;
+  yearMin: string;
+  yearMax: string;
+  dateAddedFrom: string;
+  dateAddedTo: string;
+  dateModifiedFrom: string;
+  dateModifiedTo: string;
+  hasPDF: boolean;
+  hasNotes: boolean;
+}
+
+export type SavedFiltersByLibrary = Record<string, SavedFilterPreset[]>;
+
 export interface ItemTag {
   name: string;
   type: 0 | 1;
@@ -89,6 +110,7 @@ export interface NavigatorPreferences {
   inspectorOpen: boolean;
   zettlrCitationFormat: boolean;
   itemColumnWidths: Partial<ItemColumnWidths>;
+  savedFilters: SavedFiltersByLibrary;
 }
 
 export interface NavigatorBootstrap {
@@ -128,6 +150,7 @@ export interface TagNavigatorAPI {
   initialize(): Promise<NavigatorBootstrap>;
   getTagOverview(libraryID: number): Promise<TagOverview>;
   getItems(libraryID: number, scope: ItemScope): Promise<ItemSummary[]>;
+  getRecentItems(libraryID: number): Promise<LibrarySearchResult>;
   searchLibrary(libraryID: number, query: string): Promise<LibrarySearchResult>;
   getItemDetails(itemID: number): Promise<ItemDetails>;
   addTag(itemID: number, tagName: string): Promise<ItemDetails>;
