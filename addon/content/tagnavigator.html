@@ -263,40 +263,107 @@
                 <span data-i18n="deleteView">Delete view</span>
               </button>
             </div>
-            <label>
-              <span data-i18n="author">Author</span>
-              <select id="author-filter" disabled>
+            <div class="filter-field">
+              <span
+                id="author-filter-label"
+                class="filter-label"
+                data-i18n="author"
+                >Author</span
+              >
+              <select
+                id="author-filter"
+                aria-labelledby="author-filter-label"
+                disabled
+              >
                 <option value="" data-i18n="allAuthors">All authors</option>
               </select>
-            </label>
-            <label>
-              <span data-i18n="intersectTag">Intersect tag</span>
-              <select id="second-tag-filter" disabled>
+            </div>
+            <div class="filter-field">
+              <span
+                id="second-tag-filter-label"
+                class="filter-label"
+                data-i18n="intersectTag"
+                >Intersect tag</span
+              >
+              <select
+                id="second-tag-filter"
+                aria-labelledby="second-tag-filter-label"
+                disabled
+              >
                 <option value="" data-i18n="anyTag">Any tag</option>
               </select>
-            </label>
-            <fieldset class="year-fieldset">
-              <legend data-i18n="yearRange">Year range</legend>
-              <input
-                id="year-min"
-                type="number"
-                inputmode="numeric"
-                data-i18n-placeholder="from"
-                placeholder="From"
-                aria-label="Minimum year"
-                disabled
-              />
-              <span aria-hidden="true">–</span>
-              <input
-                id="year-max"
-                type="number"
-                inputmode="numeric"
-                data-i18n-placeholder="to"
-                placeholder="To"
-                aria-label="Maximum year"
-                disabled
-              />
-            </fieldset>
+            </div>
+            <div
+              class="filter-field year-field"
+              role="group"
+              aria-labelledby="year-range-label"
+            >
+              <span
+                id="year-range-label"
+                class="filter-label"
+                data-i18n="yearRange"
+                >Year range</span
+              >
+              <div class="year-range-controls">
+                <input
+                  id="year-min"
+                  type="number"
+                  inputmode="numeric"
+                  data-i18n-placeholder="from"
+                  placeholder="From"
+                  aria-label="Minimum year"
+                  disabled
+                />
+                <span aria-hidden="true">–</span>
+                <input
+                  id="year-max"
+                  type="number"
+                  inputmode="numeric"
+                  data-i18n-placeholder="to"
+                  placeholder="To"
+                  aria-label="Maximum year"
+                  disabled
+                />
+              </div>
+            </div>
+            <div class="date-filter-row">
+              <fieldset class="date-fieldset">
+                <legend data-i18n="dateAddedRange">
+                  Date Added · From → To
+                </legend>
+                <input
+                  id="date-added-from"
+                  type="date"
+                  aria-label="Date Added From"
+                  disabled
+                />
+                <span aria-hidden="true">–</span>
+                <input
+                  id="date-added-to"
+                  type="date"
+                  aria-label="Date Added To"
+                  disabled
+                />
+              </fieldset>
+              <fieldset class="date-fieldset">
+                <legend data-i18n="dateModifiedRange">
+                  Date Modified · From → To
+                </legend>
+                <input
+                  id="date-modified-from"
+                  type="date"
+                  aria-label="Date Modified From"
+                  disabled
+                />
+                <span aria-hidden="true">–</span>
+                <input
+                  id="date-modified-to"
+                  type="date"
+                  aria-label="Date Modified To"
+                  disabled
+                />
+              </fieldset>
+            </div>
             <label class="check-row compact-check">
               <input id="filter-has-pdf" type="checkbox" disabled />
               <span data-i18n="hasPDF">Has PDF</span>

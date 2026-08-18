@@ -18,16 +18,19 @@ designed to remain responsive with large personal and group libraries.
 - **Zotero-native interface.** Uses Zotero's visual language, item icons,
   compact controls, and light or dark theme. The inspector can collapse when
   more space is needed.
-- **Whole-library search.** With no tag selected, search metadata, creators,
-  tags, notes, DOI, and CiteKey across the active library using Zotero's search
-  engine. Press `Ctrl+F` (or `Cmd+F` on macOS) to focus the item search from
-  anywhere in the window.
+- **Recent-items starting view.** With no tag selected, the center pane opens
+  with the 500 most recently modified items, ordered by date modified. Search
+  metadata, creators, tags, notes, DOI, and CiteKey across the active library
+  using Zotero's search engine. Press `Ctrl+F` (or `Cmd+F` on macOS) to focus
+  the item search from anywhere in the window.
 - **Focused tag exploration.** Select a tag and refine its items by text,
-  creator, year, PDF availability, notes, or a second intersecting tag. Click
-  the active tag again, or press `Esc`, to return to whole-library search.
-- **Saved filter views.** Name and restore useful combinations of a primary
-  tag, intersecting tag, author, year range, text, PDF, and note filters. Views
-  stay scoped to their library and report tags that no longer exist.
+  creator, year, date added, date modified, PDF availability, notes, or a
+  second intersecting tag. Click the active tag again, or press `Esc`, to
+  return to the recent-items view.
+- **Saved filter views.** Name and restore useful combinations of global or
+  tag-scoped search, intersecting tag, author, year and date ranges, PDF, and
+  note filters. Views stay scoped to their library and report tags that no
+  longer exist.
 - **Resizable, sortable result columns.** Drag any result-header divider to
   persist its width, or double-click it to reset. Zotero's date added and date
   modified appear as compact local dates, retain the full timestamp in a

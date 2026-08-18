@@ -225,6 +225,42 @@ export class TagNavigatorService implements TagNavigatorAPI {
   }
 
   /**
+   * Returns a bounded initial view ordered by Zotero's stored modification
+   * timestamp. This keeps opening a large library fast while avoiding an
+   * empty results pane.
+   */
+  async getRecentItems(libraryID: number): Promise<LibrarySearchResult> {
+    this.assertLibrary(libraryID);
+    const itemIDs = await Zotero.DB.columnQueryAsync<number>(
+      `
+        SELECT I.itemID
+        FROM items I
+        JOIN itemTypes ITEMTYPE USING (itemTypeID)
+        LEFT JOIN deletedItems D USING (itemID)
+        WHERE I.libraryID = ?
+          AND D.itemID IS NULL
+          AND ITEMTYPE.typeName NOT IN ('attachment', 'note', 'annotation')
+        ORDER BY I.dateModified DESC, I.itemID DESC
+        LIMIT ?
+      `.trim(),
+      [libraryID, LIBRARY_SEARCH_LIMIT],
+    );
+    const items = itemIDs.length
+      ? await Zotero.Items.getAsync(itemIDs)
+      : ([] as Zotero.Item[]);
+    const summaries = await this.buildItemSummaries(
+      items.filter((item) => item?.isRegularItem()),
+    );
+    const total = (await this.getTagOverview(libraryID)).totalItems;
+
+    return {
+      items: summaries,
+      total,
+      limited: total > summaries.length,
+    };
+  }
+
+  /**
    * Searches the active library through Zotero's own metadata search engine.
    * An empty query intentionally returns no rows so opening the window never
    * materializes a large library in memory.

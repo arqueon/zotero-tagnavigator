@@ -20,7 +20,7 @@ import {
   getItemColumnLimits,
   ITEM_COLUMN_KEYS,
 } from "../utils/itemColumns";
-import { formatItemTimestamp } from "../utils/itemDate";
+import { formatItemTimestamp, isItemTimestampInRange } from "../utils/itemDate";
 import {
   compareItemSummaries,
   type ItemSortDirection,
@@ -70,6 +70,9 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     mixed: "Manual and automatic",
     selectTag: "Select a tag",
     allLibrary: "All library",
+    recentItems: "Recently modified",
+    recentItemsStatus:
+      "{visible} visible · {shown} most recent of {total} items",
     deselectTag: "Select again to search the whole library",
     filters: "Filters",
     author: "Author",
@@ -114,6 +117,8 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     year: "Year",
     dateAdded: "Date Added",
     dateModified: "Date Modified",
+    dateAddedRange: "Date Added · From → To",
+    dateModifiedRange: "Date Modified · From → To",
     resizeColumn: "Drag to resize · Double-click to reset",
     resizeColumnLabel: "Resize {column} column",
     filesAndNotes: "Files and notes",
@@ -223,6 +228,9 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     mixed: "Manual y automática",
     selectTag: "Selecciona una etiqueta",
     allLibrary: "Toda la biblioteca",
+    recentItems: "Modificados recientemente",
+    recentItemsStatus:
+      "{visible} visibles · {shown} más recientes de {total} elementos",
     deselectTag: "Selecciona de nuevo para buscar en toda la biblioteca",
     filters: "Filtros",
     author: "Autor",
@@ -269,6 +277,8 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     year: "Año",
     dateAdded: "Fecha de añadido",
     dateModified: "Fecha de modificación",
+    dateAddedRange: "Fecha de añadido · Desde → Hasta",
+    dateModifiedRange: "Fecha de modificación · Desde → Hasta",
     resizeColumn: "Arrastra para ajustar · Doble clic para restaurar",
     resizeColumnLabel: "Ajustar columna {column}",
     filesAndNotes: "Archivos y notas",
@@ -459,8 +469,8 @@ let selectedItemIDs = new Set<number>();
 let selectionAnchorID: number | null = null;
 let selectedDetails: ItemDetails | null = null;
 let frequentTagCandidates: TagSummary[] = [];
-let sortKey: ItemSortKey = "title";
-let sortDirection: ItemSortDirection = "ascending";
+let sortKey: ItemSortKey = "dateModified";
+let sortDirection: ItemSortDirection = "descending";
 let itemColumnWidths: ItemColumnWidths = {
   ...DEFAULT_ITEM_COLUMN_WIDTHS,
 };
@@ -477,6 +487,7 @@ let suppressNotificationsUntil = 0;
 let librarySearchQuery = "";
 let librarySearchTotal = 0;
 let librarySearchLimited = false;
+let libraryResultsMode: "recent" | "search" | null = null;
 let librarySearchTimer = 0;
 let tagActionMode: TagActionMode | null = null;
 let tagActionSource: TagSummary | null = null;
@@ -864,6 +875,10 @@ function bindEvents(): void {
     "second-tag-filter",
     "year-min",
     "year-max",
+    "date-added-from",
+    "date-added-to",
+    "date-modified-from",
+    "date-modified-to",
     "filter-has-pdf",
     "filter-has-notes",
   ]) {
@@ -1017,7 +1032,7 @@ async function loadLibrary(libraryID: number): Promise<void> {
     api.savePreferences({ selectedLibraryID: libraryID });
     updateTagRows();
     populateSavedFilterSelect();
-    enterLibrarySearch();
+    await enterLibrarySearch();
     const library = bootstrap.libraries.find((entry) => entry.id === libraryID);
     element("library-status").textContent = library
       ? translate("showingLibrary", { name: library.name })
@@ -1100,7 +1115,7 @@ function renderTagRow(entry: TagListEntry): HTMLElement {
   row.append(dot, name, count);
   row.addEventListener("click", () => {
     if (scopesEqual(entry.scope, currentScope)) {
-      enterLibrarySearch();
+      void enterLibrarySearch();
     } else {
       void selectScope(entry.scope);
     }
@@ -1416,7 +1431,7 @@ async function refreshAfterBulkTagMutation(
   updateTagRows();
 
   if (result.action === "delete" || !result.targetName) {
-    enterLibrarySearch();
+    await enterLibrarySearch();
     showToast(
       translate("libraryTagDeleted", {
         tag: result.sourceName,
@@ -1441,6 +1456,7 @@ async function selectScope(scope: ItemScope): Promise<void> {
   if (!applyingSavedFilter) clearSavedFilterSelection();
   const token = ++itemLoadToken;
   currentScope = scope;
+  libraryResultsMode = null;
   selectedItemID = null;
   selectedItemIDs.clear();
   selectionAnchorID = null;
@@ -1475,11 +1491,11 @@ async function selectScope(scope: ItemScope): Promise<void> {
   }
 }
 
-function enterLibrarySearch(): void {
+async function enterLibrarySearch(): Promise<void> {
   window.clearTimeout(librarySearchTimer);
-  ++itemLoadToken;
   ++detailLoadToken;
   currentScope = null;
+  libraryResultsMode = "recent";
   librarySearchQuery = "";
   librarySearchTotal = 0;
   librarySearchLimited = false;
@@ -1494,18 +1510,51 @@ function enterLibrarySearch(): void {
   setItemSearchMode(true);
   setItemControlsEnabled(false);
   element<HTMLInputElement>("item-search").disabled = false;
-  element("results-title").textContent = translate("allLibrary");
-  element("results-count").textContent = "0";
-  element("items-status").textContent = overview
-    ? translate("libraryItemCount", {
-        count: overview.totalItems.toLocaleString(language),
-      })
-    : "";
-  showItemsEmpty("searchLibraryTitle", "searchLibraryBody");
   itemVirtualList.setItems([]);
   tagVirtualList.refresh();
   closeTagActionsMenu();
   updateTagActionButton();
+  sortKey = "dateModified";
+  sortDirection = "descending";
+  await loadRecentItems();
+}
+
+async function loadRecentItems(preserveItemIDs: number[] = []): Promise<void> {
+  if (!api || currentScope) return;
+  const token = ++itemLoadToken;
+  libraryResultsMode = "recent";
+  librarySearchQuery = "";
+  selectedItemIDs = new Set(preserveItemIDs);
+  selectedItemID = preserveItemIDs[0] || null;
+  if (!preserveItemIDs.length) resetInspector();
+  element("results-title").textContent = translate("recentItems");
+  element("results-count").textContent = "…";
+  element("items-status").textContent = translate("loadingItems");
+  setResultFilterControlsEnabled(false);
+  showItemsEmpty("loadingItems", "");
+  hideError();
+
+  try {
+    const result = await api.getRecentItems(currentLibraryID);
+    if (
+      token !== itemLoadToken ||
+      currentScope ||
+      element<HTMLInputElement>("item-search").value.trim()
+    ) {
+      return;
+    }
+    allItems = result.items;
+    librarySearchTotal = result.total;
+    librarySearchLimited = result.limited;
+    populateItemFilterOptions();
+    setResultFilterControlsEnabled(allItems.length > 0);
+    applyItemFilters();
+    await restoreItemSelection(preserveItemIDs);
+  } catch (error) {
+    if (token !== itemLoadToken) return;
+    showError(error, () => loadRecentItems(preserveItemIDs));
+    showItemsEmpty("noItemsTitle", "noItemsBody");
+  }
 }
 
 function setItemSearchMode(global: boolean): void {
@@ -1579,27 +1628,11 @@ function handleItemSearchInput(): void {
   ++itemLoadToken;
   const query = input.value.trim();
   if (!query) {
-    librarySearchQuery = "";
-    librarySearchTotal = 0;
-    librarySearchLimited = false;
-    allItems = [];
-    visibleItems = [];
-    selectedItemID = null;
-    selectedItemIDs.clear();
-    selectionAnchorID = null;
-    resetInspector();
-    setResultFilterControlsEnabled(false);
-    element("results-count").textContent = "0";
-    element("items-status").textContent = overview
-      ? translate("libraryItemCount", {
-          count: overview.totalItems.toLocaleString(language),
-        })
-      : "";
-    showItemsEmpty("searchLibraryTitle", "searchLibraryBody");
-    itemVirtualList.setItems([]);
+    void loadRecentItems();
     return;
   }
 
+  libraryResultsMode = "search";
   element("results-count").textContent = "…";
   element("items-status").textContent = translate("searchingLibrary");
   setResultFilterControlsEnabled(false);
@@ -1616,6 +1649,7 @@ async function searchWholeLibrary(
 ): Promise<void> {
   if (!api || currentScope) return;
   const token = ++itemLoadToken;
+  libraryResultsMode = "search";
   librarySearchQuery = query;
   selectedItemIDs = new Set(preserveItemIDs);
   selectedItemID = preserveItemIDs[0] || null;
@@ -1647,13 +1681,18 @@ async function searchWholeLibrary(
 }
 
 function applyItemFilters(): void {
-  if (!currentScope && !librarySearchQuery) return;
+  if (!currentScope && !libraryResultsMode) return;
   const searchInput = element<HTMLInputElement>("item-search");
   const query = normalize(searchInput.value);
   const author = element<HTMLSelectElement>("author-filter").value;
   const secondTag = element<HTMLSelectElement>("second-tag-filter").value;
   const minimum = numberOrNull(element<HTMLInputElement>("year-min").value);
   const maximum = numberOrNull(element<HTMLInputElement>("year-max").value);
+  const dateAddedFrom = element<HTMLInputElement>("date-added-from").value;
+  const dateAddedTo = element<HTMLInputElement>("date-added-to").value;
+  const dateModifiedFrom =
+    element<HTMLInputElement>("date-modified-from").value;
+  const dateModifiedTo = element<HTMLInputElement>("date-modified-to").value;
   const hasPDF = element<HTMLInputElement>("filter-has-pdf").checked;
   const hasNotes = element<HTMLInputElement>("filter-has-notes").checked;
 
@@ -1671,6 +1710,16 @@ function applyItemFilters(): void {
       return false;
     if (maximum !== null && (item.year === null || item.year > maximum))
       return false;
+    if (!isItemTimestampInRange(item.dateAdded, dateAddedFrom, dateAddedTo))
+      return false;
+    if (
+      !isItemTimestampInRange(
+        item.dateModified,
+        dateModifiedFrom,
+        dateModifiedTo,
+      )
+    )
+      return false;
     if (hasPDF && !item.hasPDF) return false;
     if (hasNotes && item.noteCount === 0) return false;
     return true;
@@ -1686,6 +1735,13 @@ function applyItemFilters(): void {
     element("items-status").textContent = translate("itemStatus", {
       visible: visibleItems.length,
       total: allItems.length,
+    });
+  } else if (libraryResultsMode === "recent") {
+    element("results-count").textContent = String(visibleItems.length);
+    element("items-status").textContent = translate("recentItemsStatus", {
+      visible: visibleItems.length,
+      shown: allItems.length,
+      total: librarySearchTotal.toLocaleString(language),
     });
   } else {
     element("results-count").textContent =
@@ -1779,6 +1835,7 @@ function createTimestampCell(
   cell.setAttribute("role", "cell");
   if (!value) return cell;
 
+  cell.dataset.timestamp = value;
   const formatted = formatItemTimestamp(value, bootstrap?.locale || language);
   cell.textContent = formatted.display;
   cell.title = formatted.tooltip;
@@ -2446,7 +2503,7 @@ async function openAttachment(itemID: number): Promise<void> {
 function handleTagListKeyboard(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     event.preventDefault();
-    enterLibrarySearch();
+    void enterLibrarySearch();
     return;
   }
   if (!visibleTagRows.length) return;
@@ -2566,8 +2623,9 @@ function populateSavedFilterSelect(selectedID = ""): void {
 
 function updateSavedFilterButtons(): void {
   const selectedID = element<HTMLSelectElement>("saved-filter-select").value;
+  const filtersReady = !element<HTMLButtonElement>("filters-toggle").disabled;
   element<HTMLButtonElement>("saved-filter-save").disabled =
-    !currentScope || element<HTMLInputElement>("item-search").disabled;
+    !filtersReady || (!currentScope && !libraryResultsMode);
   element<HTMLButtonElement>("saved-filter-delete").disabled = !selectedID;
 }
 
@@ -2582,32 +2640,39 @@ function markSavedFilterDirty(): void {
 }
 
 function currentFilterPreset(id: string, name: string): SavedFilterPreset {
-  if (!currentScope) throw new Error("SAVED_FILTER_REQUIRES_SCOPE");
+  if (!currentScope && !libraryResultsMode)
+    throw new Error("SAVED_FILTER_SCOPE_UNAVAILABLE");
   return {
     id,
     name,
-    scope: currentScope,
+    scope: currentScope || { kind: "library" },
     query: element<HTMLInputElement>("item-search").value.trim(),
     author: element<HTMLSelectElement>("author-filter").value,
     secondTag: element<HTMLSelectElement>("second-tag-filter").value,
     yearMin: element<HTMLInputElement>("year-min").value,
     yearMax: element<HTMLInputElement>("year-max").value,
+    dateAddedFrom: element<HTMLInputElement>("date-added-from").value,
+    dateAddedTo: element<HTMLInputElement>("date-added-to").value,
+    dateModifiedFrom: element<HTMLInputElement>("date-modified-from").value,
+    dateModifiedTo: element<HTMLInputElement>("date-modified-to").value,
     hasPDF: element<HTMLInputElement>("filter-has-pdf").checked,
     hasNotes: element<HTMLInputElement>("filter-has-notes").checked,
   };
 }
 
 function saveCurrentFilter(): void {
-  if (!api || !currentScope) {
-    showToast(translate("savedFilterNeedsTag"), true);
-    return;
-  }
+  if (!api || (!currentScope && !libraryResultsMode)) return;
   const select = element<HTMLSelectElement>("saved-filter-select");
   const presets = librarySavedFilters().slice();
   const existing = presets.find((preset) => preset.id === select.value);
   const proposed = window.prompt(
     translate("savedFilterName"),
-    existing?.name || scopeLabel(currentScope),
+    existing?.name ||
+      (currentScope
+        ? scopeLabel(currentScope)
+        : translate(
+            libraryResultsMode === "recent" ? "recentItems" : "allLibrary",
+          )),
   );
   const name = String(proposed || "").trim();
   if (!name) return;
@@ -2658,7 +2723,15 @@ async function applySavedFilter(presetID: string): Promise<void> {
 
   applyingSavedFilter = true;
   try {
-    await selectScope(preset.scope);
+    if (preset.scope.kind === "library") {
+      await enterLibrarySearch();
+      if (preset.query) {
+        element<HTMLInputElement>("item-search").value = preset.query;
+        await searchWholeLibrary(preset.query);
+      }
+    } else {
+      await selectScope(preset.scope);
+    }
     const author = element<HTMLSelectElement>("author-filter");
     const secondTag = element<HTMLSelectElement>("second-tag-filter");
     if (
@@ -2680,6 +2753,11 @@ async function applySavedFilter(presetID: string): Promise<void> {
     secondTag.value = preset.secondTag;
     element<HTMLInputElement>("year-min").value = preset.yearMin;
     element<HTMLInputElement>("year-max").value = preset.yearMax;
+    element<HTMLInputElement>("date-added-from").value = preset.dateAddedFrom;
+    element<HTMLInputElement>("date-added-to").value = preset.dateAddedTo;
+    element<HTMLInputElement>("date-modified-from").value =
+      preset.dateModifiedFrom;
+    element<HTMLInputElement>("date-modified-to").value = preset.dateModifiedTo;
     element<HTMLInputElement>("filter-has-pdf").checked = preset.hasPDF;
     element<HTMLInputElement>("filter-has-notes").checked = preset.hasNotes;
     const bar = element("filters-bar");
@@ -2699,6 +2777,10 @@ function resetFilters(): void {
   element<HTMLSelectElement>("second-tag-filter").value = "";
   element<HTMLInputElement>("year-min").value = "";
   element<HTMLInputElement>("year-max").value = "";
+  element<HTMLInputElement>("date-added-from").value = "";
+  element<HTMLInputElement>("date-added-to").value = "";
+  element<HTMLInputElement>("date-modified-from").value = "";
+  element<HTMLInputElement>("date-modified-to").value = "";
   element<HTMLInputElement>("filter-has-pdf").checked = false;
   element<HTMLInputElement>("filter-has-notes").checked = false;
   updateActiveFilterCount();
@@ -2718,6 +2800,10 @@ function updateActiveFilterCount(): void {
     element<HTMLSelectElement>("second-tag-filter").value,
     element<HTMLInputElement>("year-min").value,
     element<HTMLInputElement>("year-max").value,
+    element<HTMLInputElement>("date-added-from").value,
+    element<HTMLInputElement>("date-added-to").value,
+    element<HTMLInputElement>("date-modified-from").value,
+    element<HTMLInputElement>("date-modified-to").value,
   ];
   let count = values.filter(Boolean).length;
   if (element<HTMLInputElement>("filter-has-pdf").checked) count++;
@@ -2773,6 +2859,10 @@ function setResultFilterControlsEnabled(enabled: boolean): void {
     "second-tag-filter",
     "year-min",
     "year-max",
+    "date-added-from",
+    "date-added-to",
+    "date-modified-from",
+    "date-modified-to",
     "filter-has-pdf",
     "filter-has-notes",
   ]) {
@@ -2828,7 +2918,7 @@ async function refreshCurrentView(): Promise<void> {
       currentScope = null;
       await searchWholeLibrary(savedQuery, savedSelectedIDs);
     } else {
-      enterLibrarySearch();
+      await loadRecentItems(savedSelectedIDs);
     }
   } catch (error) {
     showError(error, refreshCurrentView);

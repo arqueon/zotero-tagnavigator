@@ -18,6 +18,8 @@ export class TagNavigatorManager {
       this.service.getTagOverview(libraryID),
     getItems: (libraryID: number, scope: ItemScope) =>
       this.service.getItems(libraryID, scope),
+    getRecentItems: (libraryID: number) =>
+      this.service.getRecentItems(libraryID),
     searchLibrary: (libraryID: number, query: string) =>
       this.service.searchLibrary(libraryID, query),
     getItemDetails: (itemID: number) => this.service.getItemDetails(itemID),

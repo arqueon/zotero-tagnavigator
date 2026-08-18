@@ -1,12 +1,13 @@
 import type {
-  ItemScope,
   SavedFilterPreset,
+  SavedFilterScope,
   SavedFiltersByLibrary,
 } from "../types/tagNavigator";
 
-function cleanScope(value: unknown): ItemScope | null {
+function cleanScope(value: unknown): SavedFilterScope | null {
   if (!value || typeof value !== "object") return null;
-  const scope = value as Partial<ItemScope> & { tagName?: unknown };
+  const scope = value as { kind?: unknown; tagName?: unknown };
+  if (scope.kind === "library") return { kind: "library" };
   if (scope.kind === "untagged") return { kind: "untagged" };
   if (scope.kind !== "tag" || typeof scope.tagName !== "string") return null;
   const tagName = scope.tagName.trim();
@@ -31,9 +32,19 @@ function cleanPreset(value: unknown): SavedFilterPreset | null {
       typeof raw.secondTag === "string" ? raw.secondTag.slice(0, 255) : "",
     yearMin: typeof raw.yearMin === "string" ? raw.yearMin.slice(0, 4) : "",
     yearMax: typeof raw.yearMax === "string" ? raw.yearMax.slice(0, 4) : "",
+    dateAddedFrom: cleanDate(raw.dateAddedFrom),
+    dateAddedTo: cleanDate(raw.dateAddedTo),
+    dateModifiedFrom: cleanDate(raw.dateModifiedFrom),
+    dateModifiedTo: cleanDate(raw.dateModifiedTo),
     hasPDF: raw.hasPDF === true,
     hasNotes: raw.hasNotes === true,
   };
+}
+
+function cleanDate(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const date = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
 }
 
 export function sanitizeSavedFilters(value: unknown): SavedFiltersByLibrary {

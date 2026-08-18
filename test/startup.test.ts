@@ -11,7 +11,10 @@ import {
   completeItemColumnWidths,
   sanitizeItemColumnWidths,
 } from "../src/utils/itemColumns";
-import { formatItemTimestamp } from "../src/utils/itemDate";
+import {
+  formatItemTimestamp,
+  isItemTimestampInRange,
+} from "../src/utils/itemDate";
 import { compareItemSummaries } from "../src/utils/itemSort";
 import { sanitizeSavedFilters } from "../src/utils/savedFilters";
 import {
@@ -88,6 +91,13 @@ describe("startup", function () {
             secondTag: "methods",
             hasPDF: true,
           },
+          {
+            id: "recent-pdfs",
+            name: "Recent PDFs",
+            scope: { kind: "library" },
+            dateModifiedFrom: "2026-01-01",
+            hasPDF: true,
+          },
         ],
         invalid: [{ id: "ignored" }],
       }),
@@ -102,6 +112,26 @@ describe("startup", function () {
             secondTag: "methods",
             yearMin: "",
             yearMax: "",
+            dateAddedFrom: "",
+            dateAddedTo: "",
+            dateModifiedFrom: "",
+            dateModifiedTo: "",
+            hasPDF: true,
+            hasNotes: false,
+          },
+          {
+            id: "recent-pdfs",
+            name: "Recent PDFs",
+            scope: { kind: "library" },
+            query: "",
+            author: "",
+            secondTag: "",
+            yearMin: "",
+            yearMax: "",
+            dateAddedFrom: "",
+            dateAddedTo: "",
+            dateModifiedFrom: "2026-01-01",
+            dateModifiedTo: "",
             hasPDF: true,
             hasNotes: false,
           },
@@ -239,7 +269,6 @@ describe("startup", function () {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     };
-
     try {
       TagNavigator.openWindow();
       const win = (TagNavigator as any).openedWindow as Window;
@@ -376,6 +405,17 @@ describe("startup", function () {
     assert.include(formatted.tooltip, ":");
   });
 
+  it("should filter stored timestamps by inclusive date ranges", function () {
+    const timestamp = "2025-06-07 08:09:10";
+
+    assert.isTrue(isItemTimestampInRange(timestamp, "2025-06-07", ""));
+    assert.isTrue(
+      isItemTimestampInRange(timestamp, "2025-01-01", "2025-06-07"),
+    );
+    assert.isFalse(isItemTimestampInRange(timestamp, "2025-06-08", ""));
+    assert.isFalse(isItemTimestampInRange("", "2025-01-01", ""));
+  });
+
   it("should clamp and complete saved item column widths", function () {
     assert.deepEqual(
       sanitizeItemColumnWidths({
@@ -412,6 +452,174 @@ describe("startup", function () {
       assert.strictEqual(summary.dateAdded, dateAdded);
       assert.strictEqual(summary.dateModified, dateModified);
     } finally {
+      await item.eraseTx();
+    }
+  });
+
+  it("should return a recent initial list ordered by date modified", async function () {
+    this.timeout(15000);
+    const dateModified = "2099-12-31 23:59:59";
+    const item = new Zotero.Item("book");
+    item.libraryID = Zotero.Libraries.userLibraryID;
+    item.setField("title", "TagNavigator recent-list integration test");
+    item.dateModified = dateModified;
+    await item.saveTx({ skipDateModifiedUpdate: true });
+
+    try {
+      const service = new TagNavigatorService();
+      const result = await service.getRecentItems(
+        Zotero.Libraries.userLibraryID,
+      );
+
+      assert.strictEqual(result.items[0]?.id, item.id);
+      assert.strictEqual(result.items[0]?.dateModified, dateModified);
+      assert.isAtLeast(result.total, result.items.length);
+    } finally {
+      await item.eraseTx();
+    }
+  });
+
+  it("should open on the recent list with Date Modified descending", async function () {
+    this.timeout(20000);
+    const item = new Zotero.Item("book");
+    item.libraryID = Zotero.Libraries.userLibraryID;
+    item.setField("title", "TagNavigator recent-window integration test");
+    item.dateModified = "2099-12-31 23:59:59";
+    await item.saveTx({ skipDateModifiedUpdate: true });
+
+    const waitFor = async (predicate: () => boolean) => {
+      const deadline = Date.now() + 10000;
+      while (!predicate()) {
+        if (Date.now() > deadline) throw new Error("Timed out waiting for UI");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    };
+    const rectSnapshot = (rect: DOMRect) => ({
+      top: rect.top,
+      bottom: rect.bottom,
+      height: rect.height,
+    });
+
+    try {
+      TagNavigator.openWindow();
+      const win = (TagNavigator as any).openedWindow as Window;
+      await waitFor(
+        () =>
+          win.document.readyState === "complete" &&
+          win.document.getElementById("app")?.getAttribute("aria-busy") ===
+            "false" &&
+          win.document.querySelectorAll(".item-row").length >= 2,
+      );
+
+      const rows = Array.from(
+        win.document.querySelectorAll<HTMLElement>(".item-row"),
+      );
+      const firstTimestamp = rows[0].querySelector<HTMLElement>(
+        ".date-modified-column",
+      )?.dataset.timestamp;
+      const secondTimestamp = rows[1].querySelector<HTMLElement>(
+        ".date-modified-column",
+      )?.dataset.timestamp;
+      const modifiedHeader = win.document.querySelector(
+        '[data-column="dateModified"]',
+      ) as HTMLElement;
+      assert.isString(firstTimestamp);
+      assert.isString(secondTimestamp);
+      assert.isAtLeast(firstTimestamp!.localeCompare(secondTimestamp!), 0);
+      assert.strictEqual(
+        modifiedHeader.getAttribute("aria-sort"),
+        "descending",
+      );
+      assert.isFalse(
+        (win.document.getElementById("date-added-from") as HTMLInputElement)
+          .disabled,
+      );
+      assert.isFalse(
+        (win.document.getElementById("date-modified-to") as HTMLInputElement)
+          .disabled,
+      );
+
+      (
+        win.document.getElementById("filters-toggle") as HTMLButtonElement
+      ).click();
+      const filtersBar = win.document.getElementById(
+        "filters-bar",
+      ) as HTMLElement;
+      const itemsTable = win.document.getElementById(
+        "items-table",
+      ) as HTMLElement;
+      await waitFor(() => !filtersBar.hidden && filtersBar.offsetHeight > 56);
+      assert.isAtMost(
+        filtersBar.getBoundingClientRect().bottom,
+        itemsTable.getBoundingClientRect().top + 0.5,
+      );
+
+      const yearInput = win.document.getElementById("year-min")!;
+      const authorFilter = win.document.getElementById("author-filter")!;
+      const dateAddedFrom = win.document.getElementById("date-added-from")!;
+      const dateAddedTo = win.document.getElementById("date-added-to")!;
+      const dateModifiedFrom =
+        win.document.getElementById("date-modified-from")!;
+      const dateModifiedTo = win.document.getElementById("date-modified-to")!;
+      const yearBounds = yearInput.getBoundingClientRect();
+      const authorBounds = authorFilter.getBoundingClientRect();
+      const yearFieldBounds = win.document
+        .querySelector(".year-field")!
+        .getBoundingClientRect();
+      const authorFieldBounds =
+        authorFilter.parentElement!.getBoundingClientRect();
+      const dateBounds = [
+        dateAddedFrom.getBoundingClientRect(),
+        dateAddedTo.getBoundingClientRect(),
+        dateModifiedFrom.getBoundingClientRect(),
+        dateModifiedTo.getBoundingClientRect(),
+      ];
+      assert.closeTo(dateBounds[0].top, dateBounds[1].top, 0.5);
+      assert.closeTo(dateBounds[2].top, dateBounds[3].top, 0.5);
+      assert.closeTo(dateBounds[0].top, dateBounds[2].top, 0.5);
+      assert.closeTo(
+        yearBounds.top,
+        authorBounds.top,
+        0.5,
+        JSON.stringify({
+          year: rectSnapshot(yearBounds),
+          author: rectSnapshot(authorBounds),
+          yearField: rectSnapshot(yearFieldBounds),
+          authorField: rectSnapshot(authorFieldBounds),
+        }),
+      );
+      assert.closeTo(yearBounds.height, authorBounds.height, 0.5);
+      for (const bounds of dateBounds) {
+        assert.closeTo(bounds.height, yearBounds.height, 0.5);
+      }
+
+      const saveView = win.document.getElementById(
+        "saved-filter-save",
+      ) as HTMLButtonElement;
+      const savedViewSelect = win.document.getElementById(
+        "saved-filter-select",
+      ) as HTMLSelectElement;
+      const modifiedFromInput = dateModifiedFrom as HTMLInputElement;
+      assert.isFalse(saveView.disabled);
+      modifiedFromInput.value = "2026-01-01";
+      modifiedFromInput.dispatchEvent(
+        new win.Event("input", { bubbles: true }),
+      );
+      win.prompt = () => "Recent items since 2026";
+      saveView.click();
+      await waitFor(() => savedViewSelect.options.length > 1);
+      const savedViewID = savedViewSelect.value;
+      assert.isNotEmpty(savedViewID);
+
+      modifiedFromInput.value = "";
+      modifiedFromInput.dispatchEvent(
+        new win.Event("input", { bubbles: true }),
+      );
+      savedViewSelect.value = savedViewID;
+      savedViewSelect.dispatchEvent(new win.Event("change", { bubbles: true }));
+      await waitFor(() => modifiedFromInput.value === "2026-01-01");
+    } finally {
+      TagNavigator.stop();
       await item.eraseTx();
     }
   });
