@@ -8,7 +8,7 @@
   A fast, Zotero-native workspace for exploring, combining, editing, and assigning tags.
 </p>
 
-Zotero TagNavigator is an add-on for **Zotero 7, 8, and 9**. It opens in a
+Zotero TagNavigator is an add-on for **Zotero 7, 8, 9, and 10**. It opens in a
 separate window and follows Zotero's familiar three-pane layout: tags on the
 left, items in the center, and item details and actions on the right. It is
 designed to remain responsive with large personal and group libraries.

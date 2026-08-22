@@ -1,8 +1,8 @@
 {
   "name": "zotero-tagnavigator",
   "type": "module",
-  "version": "1.6.0",
-  "description": "Advanced Tag Explorer and Quick-Tagging plugin for Zotero 7/8/9",
+  "version": "1.6.1",
+  "description": "Advanced Tag Explorer and Quick-Tagging plugin for Zotero 7/8/9/10",
   "config": {
     "addonName": "Zotero TagNavigator",
     "addonID": "tagnavigator@arqueon.org",
