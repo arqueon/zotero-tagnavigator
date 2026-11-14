@@ -5,6 +5,12 @@
 </p>
 
 <p align="center">
+  <a href="https://zoteroplugins.org/p/zotero-tagnavigator">
+    <img src="https://zoteroplugins.org/badge/zotero-tagnavigator.svg" alt="Zotero Plugins grade">
+  </a>
+</p>
+
+<p align="center">
   A fast, Zotero-native workspace for exploring, combining, editing, and assigning tags.
 </p>
 

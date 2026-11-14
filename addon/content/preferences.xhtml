@@ -12,31 +12,38 @@
     <checkbox
       id="zotero-prefpane-__addonRef__-hide-automatic-tags"
       preference="extensions.zotero.__addonRef__.hideAutomaticTags"
-      data-l10n-id="pref-enable"
+      data-l10n-id="pref-hide-automatic-tags"
       style="margin-top: 10px"
     />
 
-    <hbox align="center" style="margin-top: 15px">
-      <html:label
-        for="zotero-prefpane-__addonRef__-input"
-        data-l10n-id="pref-input"
-        style="margin-right: 10px"
-      ></html:label>
-      <html:input
-        type="text"
-        id="zotero-prefpane-__addonRef__-input"
-        preference="extensions.zotero.__addonRef__.input"
-        disabled="true"
-        style="width: 150px; padding: 4px"
-      ></html:input>
-    </hbox>
+    <checkbox
+      id="zotero-prefpane-__addonRef__-zettlr-citation-format"
+      preference="extensions.zotero.__addonRef__.zettlrCitationFormat"
+      data-l10n-id="pref-zettlr-citation-format"
+      style="margin-top: 8px"
+    />
+
+    <html:p
+      data-l10n-id="pref-launcher-endpoint"
+      style="
+        margin: 14px 0 0;
+        color: var(--fill-secondary, #666);
+        font-size: 0.9em;
+      "
+    ></html:p>
   </groupbox>
 
-  <vbox style="margin-top: 25px; border-top: 1px solid #ccc; padding-top: 10px">
+  <vbox
+    style="
+      margin-top: 20px;
+      border-top: 1px solid var(--stroke-divider, #ccc);
+      padding-top: 10px;
+    "
+  >
     <html:label
       data-l10n-id="pref-help"
       data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'
-      style="color: #666; font-size: 0.85em"
+      style="color: var(--fill-secondary, #666); font-size: 0.85em"
     ></html:label>
   </vbox>
 </vbox>

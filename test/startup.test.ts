@@ -35,6 +35,19 @@ describe("startup", function () {
     assert.deepEqual(endpoint.supportedMethods, ["GET"]);
   });
 
+  it("should not bundle or expose legacy zotero-plugin-toolkit protocol handlers", async function () {
+    const bundle = await Zotero.File.getContentsFromURLAsync(
+      `chrome://${config.addonRef}/content/scripts/${config.addonRef}.js`,
+    );
+
+    assert.notInclude(bundle, "zotero://plugin");
+    assert.notInclude(bundle, "zotero://ztoolkit-debug");
+    assert.notProperty(
+      (Zotero[config.addonInstance] as any).data.ztoolkit,
+      "Prompt",
+    );
+  });
+
   it("should expose Zotero's native attachment-opening API", function () {
     const pane = Zotero.getMainWindow()?.ZoteroPane as any;
     assert.isFunction(pane?.viewAttachment);

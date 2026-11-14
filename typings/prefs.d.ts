@@ -13,7 +13,6 @@ declare namespace _ZoteroTypes {
       "zettlrCitationFormat": boolean;
       "itemColumnWidths": string;
       "savedFilters": string;
-      "input": string;
     };
   }
 }
