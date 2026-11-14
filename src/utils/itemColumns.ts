@@ -4,6 +4,17 @@ export const ITEM_COLUMN_KEYS: ItemColumnKey[] = [
   "title",
   "creator",
   "year",
+  "publication",
+  "itemType",
+  "citekey",
+  "dateAdded",
+  "dateModified",
+];
+
+export const DEFAULT_VISIBLE_ITEM_COLUMNS: ItemColumnKey[] = [
+  "title",
+  "creator",
+  "year",
   "dateAdded",
   "dateModified",
 ];
@@ -12,6 +23,9 @@ export const DEFAULT_ITEM_COLUMN_WIDTHS: ItemColumnWidths = {
   title: 300,
   creator: 110,
   year: 52,
+  publication: 150,
+  itemType: 104,
+  citekey: 112,
   dateAdded: 80,
   dateModified: 80,
 };
@@ -23,6 +37,9 @@ const ITEM_COLUMN_LIMITS: Record<
   title: { minimum: 120, maximum: 800 },
   creator: { minimum: 72, maximum: 500 },
   year: { minimum: 44, maximum: 140 },
+  publication: { minimum: 80, maximum: 480 },
+  itemType: { minimum: 68, maximum: 260 },
+  citekey: { minimum: 68, maximum: 320 },
   dateAdded: { minimum: 64, maximum: 280 },
   dateModified: { minimum: 64, maximum: 280 },
 };
@@ -56,6 +73,21 @@ export function completeItemColumnWidths(value: unknown): ItemColumnWidths {
     ...DEFAULT_ITEM_COLUMN_WIDTHS,
     ...sanitizeItemColumnWidths(value),
   };
+}
+
+export function sanitizeVisibleItemColumns(value: unknown): ItemColumnKey[] {
+  if (!Array.isArray(value)) return [...DEFAULT_VISIBLE_ITEM_COLUMNS];
+  const seen = new Set<ItemColumnKey>();
+  for (const raw of value) {
+    if (
+      typeof raw === "string" &&
+      ITEM_COLUMN_KEYS.includes(raw as ItemColumnKey)
+    ) {
+      seen.add(raw as ItemColumnKey);
+    }
+  }
+  seen.add("title");
+  return ITEM_COLUMN_KEYS.filter((key) => seen.has(key));
 }
 
 export function getItemColumnLimits(key: ItemColumnKey): {

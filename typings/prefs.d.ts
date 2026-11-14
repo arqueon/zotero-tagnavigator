@@ -10,8 +10,15 @@ declare namespace _ZoteroTypes {
       "hideAutomaticTags": boolean;
       "selectedLibraryID": number;
       "inspectorOpen": boolean;
+      "tagPaneOpen": boolean;
+      "leftPaneWidth": number;
+      "rightPaneWidth": number;
+      "density": string;
+      "doubleClickAction": string;
+      "pageSize": number;
       "zettlrCitationFormat": boolean;
       "itemColumnWidths": string;
+      "visibleColumns": string;
       "savedFilters": string;
     };
   }

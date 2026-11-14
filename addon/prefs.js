@@ -1,6 +1,13 @@
 pref("hideAutomaticTags", true);
 pref("selectedLibraryID", 0);
 pref("inspectorOpen", true);
+pref("tagPaneOpen", true);
+pref("leftPaneWidth", 276);
+pref("rightPaneWidth", 328);
+pref("density", "comfortable");
+pref("doubleClickAction", "openAttachment");
+pref("pageSize", 500);
 pref("zettlrCitationFormat", false);
 pref("itemColumnWidths", "");
+pref("visibleColumns", "");
 pref("savedFilters", "");

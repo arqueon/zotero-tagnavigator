@@ -1,25 +1,42 @@
 import { config, version as pluginVersion } from "../../package.json";
 import type {
+  AdvancedSearchCondition,
   BatchTagMutationResult,
   CitationStyleOption,
-  CopyMetadataResult,
+  CollectionOption,
+  ColoredTagSlot,
   CopyKind,
+  CopyMetadataResult,
+  DoubleClickAction,
+  InterfaceDensity,
+  ItemAttachmentSummary,
+  ItemCollectionSummary,
   ItemDetails,
+  ItemNoteSummary,
   ItemScope,
   ItemSummary,
-  LibrarySearchResult,
+  ItemTypeOption,
   LibraryOption,
+  LibrarySearchResult,
   NavigatorBootstrap,
   NavigatorPreferences,
-  TagNavigatorAPI,
+  SavedSearchOption,
+  SearchConditionDefinition,
   TagMutationResult,
+  TagNavigatorAPI,
   TagOverview,
   TagSummary,
+  UnifiedItemQuery,
+  UnifiedQueryResult,
   ZettlrCitationFormat,
   ZettlrCitationStyle,
 } from "../types/tagNavigator";
-import { sanitizeItemColumnWidths } from "../utils/itemColumns";
+import {
+  sanitizeItemColumnWidths,
+  sanitizeVisibleItemColumns,
+} from "../utils/itemColumns";
 import { sanitizeSavedFilters } from "../utils/savedFilters";
+import { MAX_COLORED_TAG_SLOTS, normalizeHexColor } from "../utils/tagColor";
 
 type TagAggregateRow = {
   name: string;
@@ -28,11 +45,80 @@ type TagAggregateRow = {
   automaticCount: number;
 };
 
+type TagFacetRow = {
+  name: string;
+  count: number;
+};
+
 const PREF_PREFIX = `extensions.zotero.${config.addonRef}.`;
-const LIBRARY_SEARCH_LIMIT = 500;
+const DEFAULT_PAGE_SIZE = 500;
+const SQLITE_CHUNK_SIZE = 850;
+
+const PRIORITY_SEARCH_CONDITIONS = [
+  "title",
+  "creator",
+  "tag",
+  "anyField",
+  "abstractNote",
+  "publicationTitle",
+  "date",
+  "year",
+  "itemType",
+  "citationKey",
+  "DOI",
+  "extra",
+  "note",
+  "childNote",
+  "annotationText",
+  "fulltextContent",
+  "collection",
+  "unfiled",
+  "dateAdded",
+  "dateModified",
+  "ISBN",
+  "ISSN",
+  "publisher",
+  "language",
+  "url",
+];
 
 function normalizeZettlrCitationStyle(value: unknown): ZettlrCitationStyle {
   return value === "in-text" || value === "in-text-suffix" ? value : "regular";
+}
+
+function normalizeDoubleClickAction(value: unknown): DoubleClickAction {
+  return value === "selectInZotero" || value === "none"
+    ? value
+    : "openAttachment";
+}
+
+function normalizeDensity(value: unknown): InterfaceDensity {
+  return value === "compact" ? "compact" : "comfortable";
+}
+
+function clampPaneWidth(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.round(Math.min(max, Math.max(min, numeric)));
+}
+
+function clampPageSize(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_PAGE_SIZE;
+  return Math.round(Math.min(5000, Math.max(100, numeric)));
+}
+
+function stripHtmlSnippet(html: string, maxChars = 140): string {
+  const plain = String(html || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > maxChars ? `${plain.slice(0, maxChars - 1)}…` : plain;
 }
 
 /** Mirrors Zettlr's citation autocomplete formats. */
@@ -64,22 +150,21 @@ export function formatCitekeysForZettlr(
 
 /**
  * The only layer that knows about Zotero internals and its SQLite schema.
- * The popup receives a small, stable API made of plain objects.
+ * The floating window receives a small, stable API made of plain objects.
  */
 export class TagNavigatorService implements TagNavigatorAPI {
   private overviewCache = new Map<number, TagOverview>();
   private itemCache = new Map<string, ItemSummary[]>();
 
   async initialize(): Promise<NavigatorBootstrap> {
-    // A plugin window can open before Zotero's asynchronous CSL bootstrap has
-    // finished. Styles.getVisible() throws in that state, so join the same
-    // idempotent initialization promise before exposing citation actions.
     await Zotero.Styles.init();
 
     const libraries = this.getLibraries();
     const citationStyles = this.getCitationStyles();
     const preferences = this.getPreferences(libraries);
     const zettlrCitationFormat = await this.getZettlrCitationFormat();
+    const searchConditions = this.getSearchConditionDefinitions();
+    const itemTypes = this.getItemTypes();
 
     return {
       locale: Zotero.locale || "en-US",
@@ -89,6 +174,8 @@ export class TagNavigatorService implements TagNavigatorAPI {
       citationStyles,
       defaultCitationStyleID: this.getDefaultCitationStyleID(citationStyles),
       zettlrCitationFormat,
+      searchConditions,
+      itemTypes,
       preferences,
     };
   }
@@ -124,11 +211,23 @@ export class TagNavigatorService implements TagNavigatorAPI {
       [libraryID],
     );
 
+    const colorMap = this.readColorMap(libraryID);
+    const coloredTags: ColoredTagSlot[] = Array.from(colorMap.entries())
+      .map(([name, info]) => ({
+        name,
+        color: info.color,
+        position: info.position,
+      }))
+      .sort((a, b) => a.position - b.position);
+
     const tags: TagSummary[] = rows.map((row) => {
+      const name = String(row.name);
       const manualCount = Number(row.manualCount) || 0;
       const automaticCount = Number(row.automaticCount) || 0;
-      return {
-        name: String(row.name),
+      const colorEntry =
+        colorMap.get(name) || colorMap.get(name.normalize()) || undefined;
+      const summary: TagSummary = {
+        name,
         count: Number(row.count) || 0,
         manualCount,
         automaticCount,
@@ -139,6 +238,11 @@ export class TagNavigatorService implements TagNavigatorAPI {
               ? "automatic"
               : "manual",
       };
+      if (colorEntry) {
+        summary.color = colorEntry.color;
+        summary.colorPosition = colorEntry.position;
+      }
+      return summary;
     });
 
     const totalItems = await this.valueQuery(
@@ -166,9 +270,466 @@ export class TagNavigatorService implements TagNavigatorAPI {
       [libraryID],
     );
 
-    const overview = { libraryID, totalItems, untaggedItems, tags };
+    const overview: TagOverview = {
+      libraryID,
+      totalItems,
+      untaggedItems,
+      tags,
+      coloredTags,
+    };
     this.overviewCache.set(libraryID, overview);
     return overview;
+  }
+
+  async getCollections(libraryID: number): Promise<CollectionOption[]> {
+    this.assertLibrary(libraryID);
+    const rawCollections =
+      Zotero.Collections.getByLibrary(libraryID, true) || [];
+    const byID = new Map<number, Zotero.Collection>();
+    const childrenByParent = new Map<number | null, Zotero.Collection[]>();
+
+    for (const col of rawCollections) {
+      if (!col || col.deleted) continue;
+      byID.set(col.id, col);
+    }
+    for (const col of byID.values()) {
+      const parentID =
+        col.parentID && byID.has(col.parentID) ? col.parentID : null;
+      const list = childrenByParent.get(parentID) || [];
+      list.push(col);
+      childrenByParent.set(parentID, list);
+    }
+
+    const result: CollectionOption[] = [];
+    const visit = (
+      parentID: number | null,
+      depth: number,
+      prefix: string[],
+    ) => {
+      const siblings = (childrenByParent.get(parentID) || []).sort((a, b) =>
+        String(a.name || "").localeCompare(String(b.name || ""), Zotero.locale),
+      );
+      for (const col of siblings) {
+        const name = String(col.name || "").trim();
+        const pathParts = [...prefix, name];
+        result.push({
+          id: col.id,
+          key: String(col.key || ""),
+          name,
+          parentID,
+          depth,
+          path: pathParts.join(" / "),
+        });
+        visit(col.id, depth + 1, pathParts);
+      }
+    };
+    visit(null, 0, []);
+    return result;
+  }
+
+  async getSavedSearches(libraryID: number): Promise<SavedSearchOption[]> {
+    this.assertLibrary(libraryID);
+    const searches = ((Zotero.Searches as any).getByLibrary(libraryID) ||
+      []) as Array<{
+      id: number;
+      key?: string;
+      name?: string;
+      deleted?: boolean;
+    }>;
+    return searches
+      .filter((search) => search && !search.deleted)
+      .map((search) => ({
+        id: search.id,
+        key: String(search.key || ""),
+        name: String(search.name || "").trim(),
+      }))
+      .filter((entry) => entry.name)
+      .sort((a, b) => a.name.localeCompare(b.name, Zotero.locale));
+  }
+
+  async queryItems(
+    libraryID: number,
+    query: UnifiedItemQuery,
+  ): Promise<UnifiedQueryResult> {
+    this.assertLibrary(libraryID);
+
+    const includeTags = Array.from(
+      new Set(
+        (query.includeTags || []).map((tag) => tag.trim()).filter(Boolean),
+      ),
+    );
+    const excludeTags = Array.from(
+      new Set(
+        (query.excludeTags || [])
+          .map((tag) => tag.trim())
+          .filter((tag) => Boolean(tag) && !includeTags.includes(tag)),
+      ),
+    );
+    const untaggedOnly = query.untaggedOnly === true;
+    const collectionID =
+      typeof query.collectionID === "number" && query.collectionID > 0
+        ? query.collectionID
+        : null;
+    const unfiledOnly = query.unfiledOnly === true;
+    const includeSubcollections = query.includeSubcollections !== false;
+    const savedSearchID =
+      typeof query.savedSearchID === "number" && query.savedSearchID > 0
+        ? query.savedSearchID
+        : null;
+    const quickSearchQuery = String(query.quickSearchQuery || "").trim();
+    const quickSearchMode =
+      query.quickSearchMode === "titleCreatorYear" ||
+      query.quickSearchMode === "everything"
+        ? query.quickSearchMode
+        : "fields";
+    const joinMode = query.joinMode === "any" ? "any" : "all";
+    const advancedConditions = this.filterValidConditions(
+      query.advancedConditions || [],
+    );
+
+    const offset = Math.max(0, Math.floor(Number(query.offset) || 0));
+    const requestedLimit =
+      typeof query.limit === "number" ? Math.floor(query.limit) : undefined;
+    const limit =
+      requestedLimit === 0
+        ? 0
+        : requestedLimit && requestedLimit > 0
+          ? Math.min(10000, requestedLimit)
+          : this.getPageSize();
+
+    const hasSearchComponent = Boolean(
+      savedSearchID ||
+      collectionID ||
+      unfiledOnly ||
+      quickSearchQuery ||
+      advancedConditions.length,
+    );
+    const hasTagComponent = Boolean(
+      untaggedOnly || includeTags.length || excludeTags.length,
+    );
+
+    // Fast path for unfiltered Recent Items view on large libraries
+    if (!hasSearchComponent && !hasTagComponent) {
+      const overview = await this.getTagOverview(libraryID);
+      const facetTagCounts: Record<string, number> = {};
+      for (const tag of overview.tags) {
+        facetTagCounts[tag.name] = tag.count;
+      }
+
+      const limitClause = limit > 0 ? "LIMIT ? OFFSET ?" : "LIMIT -1 OFFSET ?";
+      const params =
+        limit > 0 ? [libraryID, limit, offset] : [libraryID, offset];
+      const pageIDs = await Zotero.DB.columnQueryAsync<number>(
+        `
+          SELECT I.itemID
+          FROM items I
+          JOIN itemTypes ITEMTYPE USING (itemTypeID)
+          LEFT JOIN deletedItems D USING (itemID)
+          WHERE I.libraryID = ?
+            AND D.itemID IS NULL
+            AND ITEMTYPE.typeName NOT IN ('attachment', 'note', 'annotation')
+          ORDER BY I.dateModified DESC, I.itemID DESC
+          ${limitClause}
+        `.trim(),
+        params,
+      );
+      const summaries = await this.materializeOrderedRegularItems(pageIDs);
+      return {
+        items: summaries,
+        total: overview.totalItems,
+        offset,
+        hasMore: offset + summaries.length < overview.totalItems,
+        facetTagCounts,
+      };
+    }
+
+    let searchCandidateSet: Set<number> | null = null;
+    const hasOpenCandidates = (): boolean =>
+      searchCandidateSet === null || searchCandidateSet.size > 0;
+    const intersectCandidates = (ids: number[]) => {
+      const next = new Set(ids);
+      if (searchCandidateSet === null) {
+        searchCandidateSet = next;
+      } else {
+        for (const id of searchCandidateSet) {
+          if (!next.has(id)) searchCandidateSet.delete(id);
+        }
+      }
+    };
+
+    if (savedSearchID) {
+      const saved = Zotero.Searches.get(savedSearchID);
+      if (!saved || saved.libraryID !== libraryID) {
+        intersectCandidates([]);
+      } else {
+        const rawIDs = await saved.search();
+        intersectCandidates(
+          await this.resolveToRegularItemIDs(libraryID, rawIDs),
+        );
+      }
+    }
+
+    if (hasOpenCandidates() && (unfiledOnly || collectionID)) {
+      const colSearch = new Zotero.Search({ libraryID });
+      if (unfiledOnly) {
+        colSearch.addCondition("unfiled", "true");
+      } else if (collectionID) {
+        colSearch.addCondition("collectionID", "is", collectionID);
+        if (
+          includeSubcollections &&
+          this.hasSearchOperator("recursive", "true")
+        ) {
+          colSearch.addCondition("recursive", "true");
+        }
+      }
+      const rawIDs = await colSearch.search();
+      intersectCandidates(
+        await this.resolveToRegularItemIDs(libraryID, rawIDs),
+      );
+    }
+
+    if (hasOpenCandidates() && quickSearchQuery) {
+      const qs = new Zotero.Search({ libraryID });
+      if (this.hasSearchOperator("includeParents", "true")) {
+        qs.addCondition("includeParents", "true");
+      }
+      qs.addCondition(
+        `quicksearch-${quickSearchMode}`,
+        "contains",
+        quickSearchQuery,
+      );
+      const rawIDs = await qs.search();
+      intersectCandidates(
+        await this.resolveToRegularItemIDs(libraryID, rawIDs),
+      );
+    }
+
+    if (hasOpenCandidates() && advancedConditions.length) {
+      const adv = new Zotero.Search({ libraryID });
+      if (this.hasSearchOperator("includeParents", "true")) {
+        adv.addCondition("includeParents", "true");
+      }
+      if (joinMode === "any") {
+        adv.addCondition("joinMode", "any");
+      }
+      for (const cond of advancedConditions) {
+        if (cond.condition === "collection" && /^\d+$/.test(cond.value)) {
+          adv.addCondition(
+            "collectionID",
+            cond.operator as any,
+            Number(cond.value),
+          );
+        } else {
+          adv.addCondition(cond.condition, cond.operator as any, cond.value);
+        }
+      }
+      const rawIDs = await adv.search();
+      intersectCandidates(
+        await this.resolveToRegularItemIDs(libraryID, rawIDs),
+      );
+    }
+
+    if (
+      searchCandidateSet !== null &&
+      (searchCandidateSet as Set<number>).size === 0
+    ) {
+      return {
+        items: [],
+        total: 0,
+        offset,
+        hasMore: false,
+        facetTagCounts: {},
+      };
+    }
+
+    const sqlClauses: string[] = [
+      "I.libraryID = ?",
+      "D.itemID IS NULL",
+      "ITEMTYPE.typeName NOT IN ('attachment', 'note', 'annotation')",
+    ];
+    const sqlParams: Array<string | number> = [libraryID];
+
+    if (untaggedOnly) {
+      sqlClauses.push(
+        "NOT EXISTS (SELECT 1 FROM itemTags UNT WHERE UNT.itemID = I.itemID)",
+      );
+    } else {
+      for (const tag of includeTags) {
+        sqlClauses.push(
+          `EXISTS (
+            SELECT 1 FROM itemTags IT_INC
+            JOIN tags T_INC USING (tagID)
+            WHERE IT_INC.itemID = I.itemID AND T_INC.name = ?
+          )`,
+        );
+        sqlParams.push(tag);
+      }
+      if (excludeTags.length) {
+        const placeholders = excludeTags.map(() => "?").join(", ");
+        sqlClauses.push(
+          `NOT EXISTS (
+            SELECT 1 FROM itemTags IT_EXC
+            JOIN tags T_EXC USING (tagID)
+            WHERE IT_EXC.itemID = I.itemID AND T_EXC.name IN (${placeholders})
+          )`,
+        );
+        sqlParams.push(...excludeTags);
+      }
+    }
+
+    const orderedBaseIDs = await Zotero.DB.columnQueryAsync<number>(
+      `
+        SELECT I.itemID
+        FROM items I
+        JOIN itemTypes ITEMTYPE USING (itemTypeID)
+        LEFT JOIN deletedItems D USING (itemID)
+        WHERE ${sqlClauses.join(" AND ")}
+        ORDER BY I.dateModified DESC, I.itemID DESC
+      `.trim(),
+      sqlParams,
+    );
+
+    const matchedIDs =
+      searchCandidateSet === null
+        ? orderedBaseIDs
+        : orderedBaseIDs.filter((id) =>
+            (searchCandidateSet as Set<number>).has(id),
+          );
+
+    const facetTagCounts = await this.computeFacetTagCounts(matchedIDs);
+    const pageIDs =
+      limit > 0
+        ? matchedIDs.slice(offset, offset + limit)
+        : matchedIDs.slice(offset);
+    const summaries = await this.materializeOrderedRegularItems(pageIDs);
+
+    return {
+      items: summaries,
+      total: matchedIDs.length,
+      offset,
+      hasMore: offset + summaries.length < matchedIDs.length,
+      facetTagCounts,
+    };
+  }
+
+  async saveZoteroSearch(
+    libraryID: number,
+    name: string,
+    query: UnifiedItemQuery,
+  ): Promise<SavedSearchOption> {
+    this.assertEditableLibrary(libraryID);
+    const cleanedName = String(name || "").trim();
+    if (!cleanedName) throw new Error("EMPTY_SEARCH_NAME");
+
+    const search = new Zotero.Search({ libraryID, name: cleanedName });
+    const includeTags = (query.includeTags || [])
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    const excludeTags = (query.excludeTags || [])
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    const validAdvanced = this.filterValidConditions(
+      query.advancedConditions || [],
+    );
+    const quickSearchQuery = String(query.quickSearchQuery || "").trim();
+
+    const hasOuterFilters = Boolean(
+      query.unfiledOnly ||
+      query.collectionID ||
+      includeTags.length ||
+      excludeTags.length ||
+      quickSearchQuery,
+    );
+
+    if (query.unfiledOnly) {
+      search.addCondition("unfiled", "true");
+    } else if (query.collectionID) {
+      search.addCondition("collectionID", "is", query.collectionID);
+      if (
+        query.includeSubcollections !== false &&
+        this.hasSearchOperator("recursive", "true")
+      ) {
+        search.addCondition("recursive", "true");
+      }
+    }
+
+    for (const tag of includeTags) {
+      search.addCondition("tag", "is", tag);
+    }
+    for (const tag of excludeTags) {
+      search.addCondition("tag", "isNot", tag);
+    }
+
+    if (quickSearchQuery) {
+      if (query.quickSearchMode === "everything") {
+        if (this.hasSearchOperator("groupStart", "true")) {
+          search.addCondition("groupStart", "true", "");
+          search.addCondition("joinMode", "any");
+          search.addCondition("anyField", "contains", quickSearchQuery);
+          search.addCondition("fulltextContent", "contains", quickSearchQuery);
+          search.addCondition("note", "contains", quickSearchQuery);
+          search.addCondition("groupEnd", "true", "");
+        } else {
+          search.addCondition("anyField", "contains", quickSearchQuery);
+        }
+      } else if (query.quickSearchMode === "titleCreatorYear") {
+        if (this.hasSearchOperator("groupStart", "true")) {
+          search.addCondition("groupStart", "true", "");
+          search.addCondition("joinMode", "any");
+          search.addCondition("title", "contains", quickSearchQuery);
+          search.addCondition("creator", "contains", quickSearchQuery);
+          search.addCondition("year", "contains", quickSearchQuery);
+          search.addCondition("groupEnd", "true", "");
+        } else {
+          search.addCondition("title", "contains", quickSearchQuery);
+        }
+      } else {
+        search.addCondition("anyField", "contains", quickSearchQuery);
+      }
+    }
+
+    if (validAdvanced.length) {
+      const useNestedGroup =
+        query.joinMode === "any" &&
+        hasOuterFilters &&
+        this.hasSearchOperator("groupStart", "true");
+
+      if (useNestedGroup) {
+        search.addCondition("groupStart", "true", "");
+        search.addCondition("joinMode", "any");
+      } else if (query.joinMode === "any" && !hasOuterFilters) {
+        search.addCondition("joinMode", "any");
+      }
+
+      for (const cond of validAdvanced) {
+        if (cond.condition === "collection" && /^\d+$/.test(cond.value)) {
+          search.addCondition(
+            "collectionID",
+            cond.operator as any,
+            Number(cond.value),
+          );
+        } else {
+          search.addCondition(cond.condition, cond.operator as any, cond.value);
+        }
+      }
+
+      if (useNestedGroup) {
+        search.addCondition("groupEnd", "true", "");
+      }
+    }
+
+    // Ensure at least one condition exists so Zotero accepts saving it
+    if (!Object.keys(search.getConditions() || {}).length) {
+      search.addCondition("itemType", "isNot", "attachment");
+    }
+
+    await search.saveTx();
+    this.invalidate();
+    return {
+      id: search.id,
+      key: String(search.key || ""),
+      name: String(search.name || cleanedName),
+    };
   }
 
   async getItems(libraryID: number, scope: ItemScope): Promise<ItemSummary[]> {
@@ -179,92 +740,28 @@ export class TagNavigatorService implements TagNavigatorAPI {
     const cached = this.itemCache.get(cacheKey);
     if (cached) return cached;
 
-    const params: Array<string | number> = [libraryID];
-    let scopeJoin = "";
-    let scopeWhere: string;
-
-    if (scope.kind === "tag") {
-      scopeJoin = `
-        JOIN itemTags FILTER_IT ON FILTER_IT.itemID = I.itemID
-        JOIN tags FILTER_T ON FILTER_T.tagID = FILTER_IT.tagID
-      `;
-      scopeWhere = "AND FILTER_T.name = ?";
-      params.push(scope.tagName);
-    } else {
-      scopeWhere = `
-        AND NOT EXISTS (
-          SELECT 1 FROM itemTags UNT WHERE UNT.itemID = I.itemID
-        )
-      `;
-    }
-
-    const itemIDs = await Zotero.DB.columnQueryAsync<number>(
-      `
-        SELECT DISTINCT I.itemID
-        FROM items I
-        JOIN itemTypes ITEMTYPE USING (itemTypeID)
-        LEFT JOIN deletedItems D USING (itemID)
-        ${scopeJoin}
-        WHERE I.libraryID = ?
-          AND D.itemID IS NULL
-          AND ITEMTYPE.typeName NOT IN ('attachment', 'note', 'annotation')
-          ${scopeWhere}
-        ORDER BY I.dateModified DESC
-      `.trim(),
-      params,
+    const result = await this.queryItems(
+      libraryID,
+      scope.kind === "tag"
+        ? { includeTags: [scope.tagName], limit: 0 }
+        : { untaggedOnly: true, limit: 0 },
     );
-
-    const items = itemIDs.length
-      ? await Zotero.Items.getAsync(itemIDs)
-      : ([] as Zotero.Item[]);
-    const regularItems = items.filter((item) => item?.isRegularItem());
-    const summaries = await this.buildItemSummaries(regularItems);
-
-    this.rememberItems(cacheKey, summaries);
-    return summaries;
+    this.rememberItems(cacheKey, result.items);
+    return result.items;
   }
 
-  /**
-   * Returns a bounded initial view ordered by Zotero's stored modification
-   * timestamp. This keeps opening a large library fast while avoiding an
-   * empty results pane.
-   */
   async getRecentItems(libraryID: number): Promise<LibrarySearchResult> {
-    this.assertLibrary(libraryID);
-    const itemIDs = await Zotero.DB.columnQueryAsync<number>(
-      `
-        SELECT I.itemID
-        FROM items I
-        JOIN itemTypes ITEMTYPE USING (itemTypeID)
-        LEFT JOIN deletedItems D USING (itemID)
-        WHERE I.libraryID = ?
-          AND D.itemID IS NULL
-          AND ITEMTYPE.typeName NOT IN ('attachment', 'note', 'annotation')
-        ORDER BY I.dateModified DESC, I.itemID DESC
-        LIMIT ?
-      `.trim(),
-      [libraryID, LIBRARY_SEARCH_LIMIT],
-    );
-    const items = itemIDs.length
-      ? await Zotero.Items.getAsync(itemIDs)
-      : ([] as Zotero.Item[]);
-    const summaries = await this.buildItemSummaries(
-      items.filter((item) => item?.isRegularItem()),
-    );
-    const total = (await this.getTagOverview(libraryID)).totalItems;
-
+    const result = await this.queryItems(libraryID, {
+      offset: 0,
+      limit: this.getPageSize(),
+    });
     return {
-      items: summaries,
-      total,
-      limited: total > summaries.length,
+      items: result.items,
+      total: result.total,
+      limited: result.hasMore,
     };
   }
 
-  /**
-   * Searches the active library through Zotero's own metadata search engine.
-   * An empty query intentionally returns no rows so opening the window never
-   * materializes a large library in memory.
-   */
   async searchLibrary(
     libraryID: number,
     query: string,
@@ -273,39 +770,33 @@ export class TagNavigatorService implements TagNavigatorAPI {
     const cleaned = query.trim();
     if (!cleaned) return { items: [], total: 0, limited: false };
 
-    const search = new Zotero.Search({ libraryID });
-    search.addCondition("quicksearch-fields", "contains", cleaned);
-    search.addCondition("noChildren", "true");
-    search.addCondition("itemType", "isNot", "attachment");
-    search.addCondition("itemType", "isNot", "note");
-    search.addCondition("itemType", "isNot", "annotation");
-    search.addCondition("deleted", "false");
-
-    const itemIDs = await search.search();
-    const visibleIDs = itemIDs.slice(0, LIBRARY_SEARCH_LIMIT);
-    const items = visibleIDs.length
-      ? await Zotero.Items.getAsync(visibleIDs)
-      : ([] as Zotero.Item[]);
-    const summaries = await this.buildItemSummaries(
-      items.filter((item) => item?.isRegularItem()),
-    );
-
+    const result = await this.queryItems(libraryID, {
+      quickSearchQuery: cleaned,
+      quickSearchMode: "fields",
+      offset: 0,
+      limit: this.getPageSize(),
+    });
     return {
-      items: summaries,
-      total: itemIDs.length,
-      limited: itemIDs.length > summaries.length,
+      items: result.items,
+      total: result.total,
+      limited: result.hasMore,
     };
   }
 
   async getItemDetails(itemID: number): Promise<ItemDetails> {
     const item = await this.getRegularItem(itemID);
     const [summary] = await this.buildItemSummaries([item]);
+    const collections = await this.getItemCollections(item);
+    const attachments = await this.getItemAttachmentSummaries(item);
+    const notesPreview = await this.getItemNoteSummaries(item);
 
     return {
       ...summary,
-      publicationTitle: this.getField(item, "publicationTitle"),
       doi: this.getField(item, "DOI"),
       url: this.getField(item, "url"),
+      collections,
+      attachments,
+      notesPreview,
     };
   }
 
@@ -379,6 +870,162 @@ export class TagNavigatorService implements TagNavigatorAPI {
     };
   }
 
+  async setTagColor(
+    libraryID: number,
+    tagName: string,
+    color: string | null,
+    position?: number,
+  ): Promise<void> {
+    this.assertEditableLibrary(libraryID);
+    const cleaned = this.validateTagName(tagName).normalize();
+
+    if (!color) {
+      await (Zotero.Tags as any).setColor(libraryID, cleaned, false, false);
+      this.invalidate();
+      return;
+    }
+
+    const normalizedColor = normalizeHexColor(color);
+    if (!normalizedColor) throw new Error("INVALID_TAG_COLOR");
+
+    const colors = this.readColorMap(libraryID);
+    const maxSlots = Zotero.Tags.MAX_COLORED_TAGS || MAX_COLORED_TAG_SLOTS;
+    const isExisting = colors.has(cleaned);
+
+    let targetPosition: number | undefined;
+    if (typeof position === "number" && Number.isInteger(position)) {
+      if (position < 1 || position > maxSlots) {
+        throw new Error("INVALID_COLOR_POSITION");
+      }
+      targetPosition = position - 1;
+    }
+
+    if (!isExisting && colors.size >= maxSlots) {
+      if (targetPosition !== undefined) {
+        const occupant = Zotero.Tags.getColorByPosition(
+          libraryID,
+          targetPosition,
+        );
+        if (occupant && occupant.name !== cleaned) {
+          await (Zotero.Tags as any).setColor(
+            libraryID,
+            occupant.name,
+            false,
+            false,
+          );
+        } else {
+          throw new Error("MAX_COLORED_TAGS_REACHED");
+        }
+      } else {
+        throw new Error("MAX_COLORED_TAGS_REACHED");
+      }
+    }
+
+    await (Zotero.Tags as any).setColor(
+      libraryID,
+      cleaned,
+      normalizedColor,
+      targetPosition,
+    );
+    this.invalidate();
+  }
+
+  async toggleColoredTagByPosition(
+    libraryID: number,
+    itemIDs: number[],
+    position: number,
+  ): Promise<BatchTagMutationResult | null> {
+    this.assertEditableLibrary(libraryID);
+    const maxSlots = Zotero.Tags.MAX_COLORED_TAGS || MAX_COLORED_TAG_SLOTS;
+    if (!Number.isInteger(position) || position < 1 || position > maxSlots) {
+      return null;
+    }
+    const slot = Zotero.Tags.getColorByPosition(libraryID, position - 1);
+    if (!slot || !slot.name) return null;
+
+    const items = await this.getEditableRegularItems(itemIDs);
+    const allHaveTag = items.every((item) => item.hasTag(slot.name));
+    return allHaveTag
+      ? this.removeTags(itemIDs, slot.name)
+      : this.addTags(itemIDs, slot.name);
+  }
+
+  async convertAutomaticTagToManual(
+    libraryID: number,
+    tagName: string,
+  ): Promise<TagMutationResult> {
+    this.assertEditableLibrary(libraryID);
+    const cleaned = this.validateTagName(tagName);
+    const itemIDs = await Zotero.DB.columnQueryAsync<number>(
+      `
+        SELECT DISTINCT I.itemID
+        FROM items I
+        JOIN itemTypes ITEMTYPE USING (itemTypeID)
+        JOIN itemTags IT USING (itemID)
+        JOIN tags T USING (tagID)
+        LEFT JOIN deletedItems D USING (itemID)
+        WHERE I.libraryID = ?
+          AND D.itemID IS NULL
+          AND ITEMTYPE.typeName NOT IN ('attachment', 'note', 'annotation')
+          AND T.name = ?
+          AND IT.type = 1
+      `.trim(),
+      [libraryID, cleaned],
+    );
+
+    if (!itemIDs.length) {
+      return {
+        action: "convertToManual",
+        sourceName: cleaned,
+        affectedItems: 0,
+      };
+    }
+
+    const items = await Zotero.Items.getAsync(itemIDs);
+    let affectedItems = 0;
+    await Zotero.DB.executeTransaction(async () => {
+      for (const item of items) {
+        if (!item?.isRegularItem()) continue;
+        if (item.addTag(cleaned, 0)) {
+          await item.save();
+          affectedItems++;
+        }
+      }
+    });
+    this.invalidate();
+    return {
+      action: "convertToManual",
+      sourceName: cleaned,
+      affectedItems,
+    };
+  }
+
+  async removeAutomaticTags(libraryID: number): Promise<TagMutationResult> {
+    this.assertEditableLibrary(libraryID);
+    const affectedItems = await this.valueQuery(
+      `
+        SELECT COUNT(DISTINCT I.itemID)
+        FROM items I
+        JOIN itemTypes ITEMTYPE USING (itemTypeID)
+        JOIN itemTags IT USING (itemID)
+        LEFT JOIN deletedItems D USING (itemID)
+        WHERE I.libraryID = ?
+          AND D.itemID IS NULL
+          AND ITEMTYPE.typeName NOT IN ('attachment', 'note', 'annotation')
+          AND IT.type = 1
+      `,
+      [libraryID],
+    );
+
+    await Zotero.Tags.removeAutomaticFromLibrary(libraryID, () => undefined);
+    this.invalidate();
+    return {
+      action: "removeAllAutomatic",
+      sourceName: "*",
+      affectedItems,
+    };
+  }
+
   async renameTag(
     libraryID: number,
     sourceName: string,
@@ -421,8 +1068,6 @@ export class TagNavigatorService implements TagNavigatorAPI {
       throw new Error("MERGE_TARGET_NOT_FOUND");
     }
 
-    // Zotero's native implementation uses UPDATE OR REPLACE, so items that
-    // already have the target tag are deduplicated inside Zotero's transaction.
     await Zotero.Tags.rename(libraryID, source, target);
     this.invalidate();
     return {
@@ -541,6 +1186,22 @@ export class TagNavigatorService implements TagNavigatorAPI {
     return true;
   }
 
+  async openAttachmentByID(attachmentID: number): Promise<boolean> {
+    const attachment = await Zotero.Items.getAsync(attachmentID);
+    if (!attachment || !attachment.isAttachment()) return false;
+    const mainWindow = Zotero.getMainWindow();
+    if (!mainWindow?.ZoteroPane) throw new Error("MAIN_WINDOW_UNAVAILABLE");
+    mainWindow.focus();
+    await Promise.resolve(
+      (mainWindow.ZoteroPane as any).viewAttachment(
+        attachment.id,
+        undefined,
+        false,
+      ),
+    );
+    return true;
+  }
+
   savePreferences(preferences: Partial<NavigatorPreferences>): void {
     if (typeof preferences.hideAutomaticTags === "boolean") {
       this.setPref("hideAutomaticTags", preferences.hideAutomaticTags);
@@ -554,6 +1215,33 @@ export class TagNavigatorService implements TagNavigatorAPI {
     if (typeof preferences.inspectorOpen === "boolean") {
       this.setPref("inspectorOpen", preferences.inspectorOpen);
     }
+    if (typeof preferences.tagPaneOpen === "boolean") {
+      this.setPref("tagPaneOpen", preferences.tagPaneOpen);
+    }
+    if (typeof preferences.leftPaneWidth === "number") {
+      this.setPref(
+        "leftPaneWidth",
+        clampPaneWidth(preferences.leftPaneWidth, 276, 210, 520),
+      );
+    }
+    if (typeof preferences.rightPaneWidth === "number") {
+      this.setPref(
+        "rightPaneWidth",
+        clampPaneWidth(preferences.rightPaneWidth, 328, 250, 560),
+      );
+    }
+    if (preferences.density) {
+      this.setPref("density", normalizeDensity(preferences.density));
+    }
+    if (preferences.doubleClickAction) {
+      this.setPref(
+        "doubleClickAction",
+        normalizeDoubleClickAction(preferences.doubleClickAction),
+      );
+    }
+    if (typeof preferences.pageSize === "number") {
+      this.setPref("pageSize", clampPageSize(preferences.pageSize));
+    }
     if (typeof preferences.zettlrCitationFormat === "boolean") {
       this.setPref("zettlrCitationFormat", preferences.zettlrCitationFormat);
     }
@@ -562,6 +1250,10 @@ export class TagNavigatorService implements TagNavigatorAPI {
       if (Object.keys(widths).length) {
         this.setPref("itemColumnWidths", JSON.stringify(widths));
       }
+    }
+    if (preferences.visibleColumns) {
+      const visible = sanitizeVisibleItemColumns(preferences.visibleColumns);
+      this.setPref("visibleColumns", JSON.stringify(visible));
     }
     if (preferences.savedFilters) {
       const savedFilters = sanitizeSavedFilters(preferences.savedFilters);
@@ -572,6 +1264,281 @@ export class TagNavigatorService implements TagNavigatorAPI {
   invalidate(): void {
     this.overviewCache.clear();
     this.itemCache.clear();
+  }
+
+  private readColorMap(
+    libraryID: number,
+  ): Map<string, { color: string; position: number }> {
+    try {
+      const raw = Zotero.Tags.getColors(libraryID);
+      if (!raw) return new Map();
+      const normalized = new Map<string, { color: string; position: number }>();
+      for (const [name, info] of raw.entries()) {
+        normalized.set(name, {
+          color: info.color,
+          position: Number(info.position) + 1,
+        });
+      }
+      return normalized;
+    } catch {
+      return new Map();
+    }
+  }
+
+  private hasSearchOperator(condition: string, operator: string): boolean {
+    try {
+      return Boolean(
+        (Zotero as any).SearchConditions?.hasOperator?.(condition, operator),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private filterValidConditions(
+    conditions: AdvancedSearchCondition[],
+  ): AdvancedSearchCondition[] {
+    const valid: AdvancedSearchCondition[] = [];
+    for (const raw of conditions) {
+      const condition = String(raw?.condition || "").trim();
+      const operator = String(raw?.operator || "").trim();
+      const value = String(raw?.value ?? "").trim();
+      if (!condition || !operator) continue;
+      const valueOptional =
+        operator === "true" ||
+        operator === "false" ||
+        operator === "isEmpty" ||
+        operator === "isNotEmpty";
+      if (!valueOptional && !value) continue;
+
+      if (
+        condition === "collection" &&
+        /^\d+$/.test(value) &&
+        this.hasSearchOperator("collection", operator)
+      ) {
+        valid.push({ condition, operator, value });
+        continue;
+      }
+
+      if (this.hasSearchOperator(condition, operator)) {
+        valid.push({ condition, operator, value });
+      }
+    }
+    return valid;
+  }
+
+  private async resolveToRegularItemIDs(
+    libraryID: number,
+    rawIDs: number[],
+  ): Promise<number[]> {
+    if (!rawIDs.length) return [];
+    const unique = Array.from(
+      new Set(rawIDs.filter((id) => Number.isInteger(id) && id > 0)),
+    );
+    if (!unique.length) return [];
+
+    const resolved = new Set<number>();
+    for (let i = 0; i < unique.length; i += SQLITE_CHUNK_SIZE) {
+      const chunk = unique.slice(i, i + SQLITE_CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = await Zotero.DB.columnQueryAsync<number>(
+        `
+          SELECT DISTINCT COALESCE(IA.parentItemID, INO.parentItemID, IAN.parentItemID, I.itemID) AS resolvedID
+          FROM items I
+          LEFT JOIN itemAttachments IA ON IA.itemID = I.itemID
+          LEFT JOIN itemNotes INO ON INO.itemID = I.itemID
+          LEFT JOIN itemAnnotations IAN ON IAN.itemID = I.itemID
+          WHERE I.libraryID = ? AND I.itemID IN (${placeholders})
+        `.trim(),
+        [libraryID, ...chunk],
+      );
+      for (const id of rows) {
+        if (id) resolved.add(Number(id));
+      }
+    }
+    return Array.from(resolved);
+  }
+
+  private async computeFacetTagCounts(
+    itemIDs: number[],
+  ): Promise<Record<string, number>> {
+    if (!itemIDs.length) return {};
+    const counts: Record<string, number> = {};
+
+    if (itemIDs.length <= SQLITE_CHUNK_SIZE) {
+      const placeholders = itemIDs.map(() => "?").join(", ");
+      const rows = await this.queryRows<TagFacetRow>(
+        `
+          SELECT T.name AS name, COUNT(DISTINCT IT.itemID) AS count
+          FROM itemTags IT
+          JOIN tags T USING (tagID)
+          WHERE IT.itemID IN (${placeholders})
+          GROUP BY T.tagID, T.name
+        `,
+        itemIDs,
+      );
+      for (const row of rows) {
+        counts[String(row.name)] = Number(row.count) || 0;
+      }
+      return counts;
+    }
+
+    // Large result sets (>850 items): aggregate distinct items per tag across chunks
+    const seenByTag = new Map<string, number>();
+    for (let i = 0; i < itemIDs.length; i += SQLITE_CHUNK_SIZE) {
+      const chunk = itemIDs.slice(i, i + SQLITE_CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = await this.queryRows<TagFacetRow>(
+        `
+          SELECT T.name AS name, COUNT(DISTINCT IT.itemID) AS count
+          FROM itemTags IT
+          JOIN tags T USING (tagID)
+          WHERE IT.itemID IN (${placeholders})
+          GROUP BY T.tagID, T.name
+        `,
+        chunk,
+      );
+      for (const row of rows) {
+        const name = String(row.name);
+        seenByTag.set(
+          name,
+          (seenByTag.get(name) || 0) + (Number(row.count) || 0),
+        );
+      }
+    }
+    for (const [name, count] of seenByTag.entries()) {
+      counts[name] = count;
+    }
+    return counts;
+  }
+
+  private async materializeOrderedRegularItems(
+    itemIDs: number[],
+  ): Promise<ItemSummary[]> {
+    if (!itemIDs.length) return [];
+    const items = await Zotero.Items.getAsync(itemIDs);
+    const byID = new Map<number, Zotero.Item>();
+    for (const item of items) {
+      if (item?.isRegularItem()) byID.set(item.id, item);
+    }
+    const ordered = itemIDs
+      .map((id) => byID.get(id))
+      .filter((item): item is Zotero.Item => Boolean(item));
+    return this.buildItemSummaries(ordered);
+  }
+
+  private getSearchConditionDefinitions(): SearchConditionDefinition[] {
+    const sc = (Zotero as any).SearchConditions;
+    if (!sc?.get) return [];
+
+    const standard: Array<{ name: string }> =
+      sc.getStandardConditions?.() || [];
+    const candidateNames = Array.from(
+      new Set([
+        ...PRIORITY_SEARCH_CONDITIONS,
+        ...standard.map((entry) => String(entry?.name || "")),
+      ]),
+    ).filter(Boolean);
+
+    const definitions: SearchConditionDefinition[] = [];
+    for (const name of candidateNames) {
+      try {
+        const cond = sc.get(name);
+        if (!cond || !cond.operators) continue;
+        const operators = Object.keys(cond.operators).filter(
+          (op) => cond.operators[op],
+        );
+        if (!operators.length) continue;
+        let label = name;
+        try {
+          label = String(sc.getLocalizedName?.(name) || cond.localized || name);
+        } catch {
+          label = String(cond.localized || name);
+        }
+        definitions.push({ name, label, operators });
+      } catch {
+        // Ignore unsupported conditions in older/newer Zotero builds
+      }
+    }
+    return definitions;
+  }
+
+  private getItemTypes(): ItemTypeOption[] {
+    try {
+      const rawTypes: Array<{ id?: number; name: string }> =
+        (Zotero.ItemTypes as any).getPrimaryTypes?.() ||
+        (Zotero.ItemTypes as any).getTypes?.() ||
+        [];
+      return rawTypes
+        .filter(
+          (entry) =>
+            entry?.name &&
+            !["attachment", "note", "annotation"].includes(entry.name),
+        )
+        .map((entry) => ({
+          name: entry.name,
+          label: String(
+            Zotero.ItemTypes.getLocalizedString(
+              (entry.id ?? entry.name) as any,
+            ) || entry.name,
+          ),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, Zotero.locale));
+    } catch {
+      return [];
+    }
+  }
+
+  private async getItemCollections(
+    item: Zotero.Item,
+  ): Promise<ItemCollectionSummary[]> {
+    try {
+      const collectionIDs = item.getCollections() || [];
+      if (!collectionIDs.length) return [];
+      const libraryCollections = await this.getCollections(item.libraryID);
+      const byID = new Map(libraryCollections.map((col) => [col.id, col.path]));
+      return collectionIDs
+        .map((id) => ({
+          id,
+          path: byID.get(id) || "",
+        }))
+        .filter((entry) => entry.path)
+        .sort((a, b) => a.path.localeCompare(b.path, Zotero.locale));
+    } catch {
+      return [];
+    }
+  }
+
+  private async getItemAttachmentSummaries(
+    item: Zotero.Item,
+  ): Promise<ItemAttachmentSummary[]> {
+    const attachmentIDs = item.getAttachments() || [];
+    if (!attachmentIDs.length) return [];
+    const attachments = await Zotero.Items.getAsync(attachmentIDs);
+    return attachments
+      .filter((att) => att && !att.deleted && att.isAttachment())
+      .map((att) => ({
+        id: att.id,
+        title: this.getField(att, "title") || "Attachment",
+        contentType: String((att as any).attachmentContentType || ""),
+        isPDF: att.isPDFAttachment(),
+      }));
+  }
+
+  private async getItemNoteSummaries(
+    item: Zotero.Item,
+  ): Promise<ItemNoteSummary[]> {
+    const noteIDs = item.getNotes() || [];
+    if (!noteIDs.length) return [];
+    const notes = await Zotero.Items.getAsync(noteIDs);
+    return notes
+      .filter((note) => note && !note.deleted && note.isNote())
+      .slice(0, 8)
+      .map((note) => ({
+        id: note.id,
+        snippet: stripHtmlSnippet(note.getNote()),
+      }))
+      .filter((entry) => entry.snippet);
   }
 
   private getLibraries(): LibraryOption[] {
@@ -613,6 +1580,10 @@ export class TagNavigatorService implements TagNavigatorAPI {
     );
   }
 
+  private getPageSize(): number {
+    return clampPageSize(this.getPref("pageSize"));
+  }
+
   private getPreferences(libraries: LibraryOption[]): NavigatorPreferences {
     const savedLibraryID = Number(this.getPref("selectedLibraryID")) || 0;
     const selectedLibraryID = libraries.some(
@@ -633,8 +1604,27 @@ export class TagNavigatorService implements TagNavigatorAPI {
             : true,
       selectedLibraryID,
       inspectorOpen: this.getPref("inspectorOpen") !== false,
+      tagPaneOpen: this.getPref("tagPaneOpen") !== false,
+      leftPaneWidth: clampPaneWidth(
+        this.getPref("leftPaneWidth"),
+        276,
+        210,
+        520,
+      ),
+      rightPaneWidth: clampPaneWidth(
+        this.getPref("rightPaneWidth"),
+        328,
+        250,
+        560,
+      ),
+      density: normalizeDensity(this.getPref("density")),
+      doubleClickAction: normalizeDoubleClickAction(
+        this.getPref("doubleClickAction"),
+      ),
+      pageSize: this.getPageSize(),
       zettlrCitationFormat: this.getPref("zettlrCitationFormat") === true,
       itemColumnWidths: this.getItemColumnWidths(),
+      visibleColumns: this.getVisibleColumns(),
       savedFilters: this.getSavedFilters(),
     };
   }
@@ -657,6 +1647,18 @@ export class TagNavigatorService implements TagNavigatorAPI {
       return sanitizeItemColumnWidths(JSON.parse(saved));
     } catch {
       return {};
+    }
+  }
+
+  private getVisibleColumns(): NavigatorPreferences["visibleColumns"] {
+    const saved = this.getPref("visibleColumns");
+    if (typeof saved !== "string" || !saved.trim()) {
+      return sanitizeVisibleItemColumns(null);
+    }
+    try {
+      return sanitizeVisibleItemColumns(JSON.parse(saved));
+    } catch {
+      return sanitizeVisibleItemColumns(null);
     }
   }
 
@@ -728,6 +1730,8 @@ export class TagNavigatorService implements TagNavigatorAPI {
   private async buildItemSummaries(
     items: Zotero.Item[],
   ): Promise<ItemSummary[]> {
+    if (!items.length) return [];
+
     const attachmentIDs = Array.from(
       new Set(items.flatMap((item) => item.getAttachments())),
     );
@@ -742,6 +1746,19 @@ export class TagNavigatorService implements TagNavigatorAPI {
       siblings.push(attachment);
       attachmentsByParent.set(attachment.parentItemID, siblings);
     }
+
+    const colorMapsByLibrary = new Map<
+      number,
+      Map<string, { color: string; position: number }>
+    >();
+    const getLibraryColors = (libraryID: number) => {
+      let map = colorMapsByLibrary.get(libraryID);
+      if (!map) {
+        map = this.readColorMap(libraryID);
+        colorMapsByLibrary.set(libraryID, map);
+      }
+      return map;
+    };
 
     return items.map((item) => {
       const creators = item
@@ -759,12 +1776,14 @@ export class TagNavigatorService implements TagNavigatorAPI {
       const date = this.getField(item, "date");
       const yearMatch = date.match(/(?:^|\D)(1\d{3}|20\d{2}|21\d{2})(?:\D|$)/);
       const itemAttachments = attachmentsByParent.get(item.id) || [];
+      const libraryColors = getLibraryColors(item.libraryID);
 
       return {
         id: item.id,
         libraryID: item.libraryID,
         title: this.getField(item, "title"),
         abstract: this.getField(item, "abstractNote"),
+        publicationTitle: this.getField(item, "publicationTitle"),
         date,
         year: yearMatch ? Number(yearMatch[1]) : null,
         dateAdded: String(item.dateAdded || ""),
@@ -776,10 +1795,18 @@ export class TagNavigatorService implements TagNavigatorAPI {
         creators,
         creatorSearch: creators.join(" ").toLocaleLowerCase(Zotero.locale),
         citekey: this.getField(item, "citationKey"),
-        tags: item.getTags().map((tag) => ({
-          name: tag.tag,
-          type: tag.type === 1 ? 1 : 0,
-        })),
+        tags: item.getTags().map((tag) => {
+          const colorInfo =
+            libraryColors.get(tag.tag) ||
+            libraryColors.get(tag.tag.normalize());
+          return {
+            name: tag.tag,
+            type: (tag.type === 1 ? 1 : 0) as 0 | 1,
+            ...(colorInfo
+              ? { color: colorInfo.color, colorPosition: colorInfo.position }
+              : {}),
+          };
+        }),
         attachmentCount: itemAttachments.length,
         noteCount: item.getNotes().length,
         hasPDF: itemAttachments.some((attachment) =>
@@ -865,9 +1892,6 @@ export class TagNavigatorService implements TagNavigatorAPI {
     sql: string,
     params: Array<string | number>,
   ): Promise<T[]> {
-    // Zotero 9 detects SELECT with a parser that only treats an ASCII space as
-    // the command delimiter. Leading whitespace or `SELECT\n...` executes in
-    // SQLite but makes queryAsync return undefined, so normalize the header.
     const normalizedSQL = sql
       .trim()
       .replace(/^([a-z]+)\s+/i, (_match, command: string) => `${command} `);
@@ -900,11 +1924,11 @@ export class TagNavigatorService implements TagNavigatorAPI {
     this.itemCache.set(cacheKey, items);
   }
 
-  private getPref(name: string): boolean | string | number | undefined {
-    return Zotero.Prefs.get(`${PREF_PREFIX}${name}`, true);
+  private getPref(key: string): unknown {
+    return Zotero.Prefs.get(`${PREF_PREFIX}${key}`, true);
   }
 
-  private setPref(name: string, value: boolean | string | number): void {
-    Zotero.Prefs.set(`${PREF_PREFIX}${name}`, value, true);
+  private setPref(key: string, value: string | number | boolean): void {
+    Zotero.Prefs.set(`${PREF_PREFIX}${key}`, value, true);
   }
 }

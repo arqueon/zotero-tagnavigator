@@ -44,8 +44,54 @@
           <select id="library-select" aria-label="Library"></select>
         </label>
 
+        <label class="collection-picker" for="scope-collection-select">
+          <span class="visually-hidden" data-i18n="collectionOrSearch"
+            >Collection or Saved Search</span
+          >
+          <select
+            id="scope-collection-select"
+            aria-label="Collection or Saved Search"
+          >
+            <option value="" data-i18n="allItemsScope">All items</option>
+          </select>
+        </label>
+
         <div class="toolbar-spacer"></div>
 
+        <button
+          id="tag-pane-toggle"
+          class="icon-button"
+          type="button"
+          data-i18n-title="toggleTagPane"
+          aria-label="Toggle tag pane"
+          aria-controls="tag-pane"
+          aria-pressed="true"
+        >
+          <img
+            class="icon"
+            src="chrome://zotero/skin/16/universal/tag.svg"
+            alt=""
+          />
+        </button>
+        <button
+          id="density-toggle"
+          class="icon-button compact-label-button"
+          type="button"
+          data-i18n-title="toggleDensity"
+          aria-label="Toggle row density"
+          aria-pressed="false"
+        >
+          <span id="density-toggle-label">≡</span>
+        </button>
+        <button
+          id="shortcuts-button"
+          class="icon-button compact-label-button"
+          type="button"
+          data-i18n-title="keyboardShortcuts"
+          aria-label="Keyboard shortcuts"
+        >
+          <span aria-hidden="true">?</span>
+        </button>
         <button
           id="refresh-button"
           class="icon-button"
@@ -105,6 +151,16 @@
             <h1 data-i18n="tags">Tags</h1>
             <span id="tag-total" class="count-label">—</span>
             <button
+              id="tag-curation-button"
+              class="icon-button compact"
+              type="button"
+              data-i18n-title="tagCurationTools"
+              aria-label="Tag curation tools"
+              aria-haspopup="menu"
+            >
+              <span aria-hidden="true">⚙</span>
+            </button>
+            <button
               id="tag-actions-button"
               class="icon-button compact tag-actions-button"
               type="button"
@@ -116,6 +172,13 @@
               <span aria-hidden="true">•••</span>
             </button>
           </div>
+
+          <div
+            id="colored-tags-bar"
+            class="colored-tags-bar"
+            aria-label="Colored tags"
+            hidden
+          ></div>
 
           <div class="pane-controls">
             <div class="search-control">
@@ -148,6 +211,67 @@
               </button>
             </div>
 
+            <div class="tag-filter-toolbar">
+              <div
+                id="tag-kind-filters"
+                class="segmented-pills"
+                role="group"
+                aria-label="Tag kind filter"
+              >
+                <button
+                  type="button"
+                  class="pill-toggle active"
+                  data-tag-kind="all"
+                  data-i18n="tagFilterAll"
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  class="pill-toggle"
+                  data-tag-kind="manual"
+                  data-i18n="manual"
+                >
+                  Manual
+                </button>
+                <button
+                  type="button"
+                  class="pill-toggle"
+                  data-tag-kind="automatic"
+                  data-i18n="tagFilterAuto"
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  class="pill-toggle"
+                  data-tag-kind="colored"
+                  data-i18n="tagFilterColored"
+                >
+                  Colored
+                </button>
+                <button
+                  type="button"
+                  class="pill-toggle"
+                  data-tag-kind="single"
+                  data-i18n="tagFilterSingle"
+                  title="Count = 1"
+                >
+                  1×
+                </button>
+              </div>
+              <select
+                id="tag-sort-select"
+                class="compact-select"
+                data-i18n-title="sortTags"
+                aria-label="Sort tags"
+              >
+                <option value="name" data-i18n="sortName">A–Z</option>
+                <option value="count" data-i18n="sortCount">Count</option>
+                <option value="color" data-i18n="sortColor">Color</option>
+              </select>
+            </div>
+
             <label class="check-row">
               <input id="hide-automatic-tags" type="checkbox" />
               <span data-i18n="hideAutomatic">Hide automatic tags</span>
@@ -158,6 +282,7 @@
             id="tag-list"
             class="virtual-list tag-list"
             role="listbox"
+            aria-multiselectable="true"
             tabindex="0"
             aria-label="Tags"
           >
@@ -177,44 +302,97 @@
           </footer>
         </aside>
 
+        <div
+          id="left-splitter"
+          class="pane-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-controls="tag-pane"
+          tabindex="0"
+          data-i18n-title="resizePane"
+          aria-label="Resize tag pane"
+        ></div>
+
         <section class="items-pane" aria-label="Items">
           <div class="items-toolbar">
             <div class="selection-heading">
-              <h1 id="results-title" data-i18n="selectTag">Select a tag</h1>
+              <h1 id="results-title" data-i18n="recentItems">
+                Recently modified
+              </h1>
               <span id="results-count" class="count-badge">0</span>
             </div>
 
             <div class="item-toolbar-actions">
-              <div class="search-control item-search-control">
+              <div class="quicksearch-group">
+                <select
+                  id="quicksearch-mode"
+                  class="quicksearch-mode-select"
+                  data-i18n-title="quickSearchMode"
+                  aria-label="Quick search mode"
+                >
+                  <option value="fields" data-i18n="quickSearchFields">
+                    Fields &amp; Tags
+                  </option>
+                  <option
+                    value="titleCreatorYear"
+                    data-i18n="quickSearchTitleCreatorYear"
+                  >
+                    Title, Creator, Year
+                  </option>
+                  <option value="everything" data-i18n="quickSearchEverything">
+                    Everything
+                  </option>
+                </select>
+                <div class="search-control item-search-control">
+                  <img
+                    class="icon"
+                    src="chrome://zotero/skin/16/universal/magnifier.svg"
+                    alt=""
+                  />
+                  <input
+                    id="item-search"
+                    type="search"
+                    autocomplete="off"
+                    data-i18n-placeholder="searchItems"
+                    placeholder="Title, creator, abstract or CiteKey"
+                    aria-label="Search items"
+                    disabled
+                  />
+                  <button
+                    id="clear-item-search"
+                    class="clear-button"
+                    type="button"
+                    data-i18n-title="clearSearch"
+                    aria-label="Clear search"
+                    hidden
+                  >
+                    <img
+                      class="icon"
+                      src="chrome://zotero/skin/16/universal/x-8.svg"
+                      alt=""
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <button
+                id="advanced-search-toggle"
+                class="icon-button labeled"
+                type="button"
+                aria-controls="advanced-search-panel"
+                aria-expanded="false"
+              >
                 <img
                   class="icon"
                   src="chrome://zotero/skin/16/universal/magnifier.svg"
                   alt=""
                 />
-                <input
-                  id="item-search"
-                  type="search"
-                  autocomplete="off"
-                  data-i18n-placeholder="searchItems"
-                  placeholder="Title, creator, abstract or CiteKey"
-                  aria-label="Search items"
-                  disabled
-                />
-                <button
-                  id="clear-item-search"
-                  class="clear-button"
-                  type="button"
-                  data-i18n-title="clearSearch"
-                  aria-label="Clear search"
-                  hidden
+                <span data-i18n="advancedSearch">Advanced</span>
+                <span id="advanced-condition-count" class="filter-count" hidden
+                  >0</span
                 >
-                  <img
-                    class="icon"
-                    src="chrome://zotero/skin/16/universal/x-8.svg"
-                    alt=""
-                  />
-                </button>
-              </div>
+              </button>
+
               <button
                 id="filters-toggle"
                 class="icon-button labeled"
@@ -233,8 +411,102 @@
                   >0</span
                 >
               </button>
+
+              <button
+                id="columns-menu-button"
+                class="icon-button compact-label-button"
+                type="button"
+                data-i18n-title="columnsMenu"
+                aria-label="Visible columns"
+                aria-haspopup="menu"
+              >
+                <span aria-hidden="true">⊞</span>
+              </button>
             </div>
           </div>
+
+          <div
+            id="active-filters-strip"
+            class="active-filters-strip"
+            aria-label="Active filters"
+            hidden
+          >
+            <div id="active-filter-pills" class="active-filter-pills"></div>
+            <button
+              id="clear-all-active-filters"
+              class="text-button compact-text-button"
+              type="button"
+              data-i18n="clearAllFilters"
+            >
+              Clear all
+            </button>
+          </div>
+
+          <section
+            id="advanced-search-panel"
+            class="advanced-search-panel"
+            aria-label="Advanced Search"
+            hidden
+          >
+            <div class="advanced-search-header">
+              <label class="inline-select-label" for="advanced-join-mode">
+                <span data-i18n="matchConditions">Match</span>
+                <select id="advanced-join-mode">
+                  <option value="all" data-i18n="matchAll">all (AND)</option>
+                  <option value="any" data-i18n="matchAny">any (OR)</option>
+                </select>
+              </label>
+              <label class="check-row compact-check">
+                <input id="include-subcollections" type="checkbox" checked />
+                <span data-i18n="includeSubcollections"
+                  >Include subcollections</span
+                >
+              </label>
+              <button
+                id="advanced-add-row"
+                class="text-button"
+                type="button"
+                data-i18n="addCondition"
+              >
+                + Condition
+              </button>
+              <div class="toolbar-spacer"></div>
+              <button
+                id="advanced-clear"
+                class="text-button"
+                type="button"
+                data-i18n="clearConditions"
+              >
+                Reset
+              </button>
+              <button
+                id="advanced-save-view"
+                type="button"
+                data-i18n="saveViewEllipsis"
+              >
+                Save view…
+              </button>
+              <button
+                id="advanced-save-zotero"
+                type="button"
+                data-i18n="saveZoteroSearchEllipsis"
+              >
+                Save Zotero Search…
+              </button>
+              <button
+                id="advanced-run"
+                class="primary-button"
+                type="button"
+                data-i18n="runSearch"
+              >
+                Search
+              </button>
+            </div>
+            <div
+              id="advanced-conditions-list"
+              class="advanced-conditions-list"
+            ></div>
+          </section>
 
           <div id="filters-bar" class="filters-bar" hidden>
             <div class="saved-filter-controls">
@@ -386,7 +658,8 @@
             <img src="chrome://zotero/skin/16/universal/tag.svg" alt="" />
             <h2 data-i18n="chooseTagTitle">Choose a tag to begin</h2>
             <p data-i18n="chooseTagBody">
-              Combine a tag with text, author, year, PDF, notes and another tag.
+              Combine tags, collections, quick search, or Zotero Advanced
+              Search.
             </p>
           </div>
 
@@ -470,6 +743,72 @@
                 ></span>
               </div>
               <div
+                class="column-header publication-column"
+                data-column="publication"
+                role="columnheader"
+                hidden
+              >
+                <button
+                  class="column-sort-button"
+                  type="button"
+                  data-sort="publication"
+                >
+                  <span data-i18n="publication">Publication</span>
+                  <span class="sort-indicator"></span>
+                </button>
+                <span
+                  class="column-resizer"
+                  data-resize-column="publication"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                ></span>
+              </div>
+              <div
+                class="column-header item-type-column"
+                data-column="itemType"
+                role="columnheader"
+                hidden
+              >
+                <button
+                  class="column-sort-button"
+                  type="button"
+                  data-sort="itemType"
+                >
+                  <span data-i18n="itemType">Item type</span>
+                  <span class="sort-indicator"></span>
+                </button>
+                <span
+                  class="column-resizer"
+                  data-resize-column="itemType"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                ></span>
+              </div>
+              <div
+                class="column-header citekey-column"
+                data-column="citekey"
+                role="columnheader"
+                hidden
+              >
+                <button
+                  class="column-sort-button"
+                  type="button"
+                  data-sort="citekey"
+                >
+                  <span>CiteKey</span>
+                  <span class="sort-indicator"></span>
+                </button>
+                <span
+                  class="column-resizer"
+                  data-resize-column="citekey"
+                  role="separator"
+                  aria-orientation="vertical"
+                  tabindex="0"
+                ></span>
+              </div>
+              <div
                 class="column-header date-added-column"
                 data-column="dateAdded"
                 data-i18n-title="dateAdded"
@@ -536,9 +875,38 @@
 
           <footer class="items-statusbar">
             <span id="items-status" aria-live="polite"></span>
+            <span id="pagination-actions" class="pagination-actions" hidden>
+              <button
+                id="load-more-items"
+                class="text-button compact-text-button"
+                type="button"
+                data-i18n="loadMoreItems"
+              >
+                Load more
+              </button>
+              <button
+                id="load-all-items"
+                class="text-button compact-text-button"
+                type="button"
+                data-i18n="loadAllItems"
+              >
+                Load all
+              </button>
+            </span>
             <span id="library-status"></span>
           </footer>
         </section>
+
+        <div
+          id="right-splitter"
+          class="pane-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-controls="inspector-pane"
+          tabindex="0"
+          data-i18n-title="resizePane"
+          aria-label="Resize inspector pane"
+        ></div>
 
         <aside
           id="inspector-pane"
@@ -602,6 +970,11 @@
               </div>
             </section>
 
+            <details id="item-abstract-section" class="inspector-section" open>
+              <summary data-i18n="abstract">Abstract</summary>
+              <p id="detail-abstract" class="abstract-copy"></p>
+            </details>
+
             <details id="item-info-section" class="inspector-section" open>
               <summary data-i18n="info">Info</summary>
               <dl class="metadata-grid">
@@ -615,7 +988,22 @@
                 <dd id="detail-doi"></dd>
                 <dt>CiteKey</dt>
                 <dd id="detail-citekey"></dd>
+                <dt data-i18n="collections">Collections</dt>
+                <dd id="detail-collections" class="collection-chip-list"></dd>
               </dl>
+            </details>
+
+            <details
+              id="item-attachments-section"
+              class="inspector-section"
+              open
+            >
+              <summary>
+                <span data-i18n="filesAndNotes">Files and notes</span>
+                <span id="detail-files-count" class="section-count">0</span>
+              </summary>
+              <div id="detail-attachments" class="attachment-list"></div>
+              <div id="detail-notes" class="note-preview-list"></div>
             </details>
 
             <details id="item-tags-section" class="inspector-section" open>
@@ -653,6 +1041,19 @@
                   />
                 </button>
               </form>
+              <div
+                id="inspector-colored-tags-block"
+                class="frequent-tags-block"
+                hidden
+              >
+                <span class="field-label" data-i18n="coloredTagsShortcut"
+                  >Colored tags (1–9)</span
+                >
+                <div
+                  id="inspector-colored-tags"
+                  class="frequent-tag-list"
+                ></div>
+              </div>
               <div class="frequent-tags-block">
                 <span class="field-label" data-i18n="frequentTags"
                   >Frequent tags</span
@@ -707,6 +1108,7 @@
         </aside>
       </main>
 
+      <!-- Context & Popover Menus -->
       <div
         id="tag-actions-menu"
         class="context-menu"
@@ -714,6 +1116,35 @@
         aria-label="Tag actions"
         hidden
       >
+        <button type="button" role="menuitem" data-tag-action="filter-and">
+          <span data-i18n="filterIncludeTag">Add to AND filter (+)</span>
+        </button>
+        <button type="button" role="menuitem" data-tag-action="filter-not">
+          <span data-i18n="filterExcludeTag">Exclude with NOT (−)</span>
+        </button>
+        <span class="menu-separator" role="separator"></span>
+        <button type="button" role="menuitem" data-tag-action="color">
+          <span data-i18n="assignTagColor">Assign / change color (1–9)…</span>
+        </button>
+        <button
+          id="tag-menu-remove-color"
+          type="button"
+          role="menuitem"
+          data-tag-action="remove-color"
+        >
+          <span data-i18n="removeTagColor">Remove color</span>
+        </button>
+        <button
+          id="tag-menu-convert-manual"
+          type="button"
+          role="menuitem"
+          data-tag-action="convert-manual"
+        >
+          <span data-i18n="convertAutoToManual"
+            >Convert automatic → manual…</span
+          >
+        </button>
+        <span class="menu-separator" role="separator"></span>
         <button type="button" role="menuitem" data-tag-action="rename">
           <span data-i18n="renameTag">Rename tag…</span>
         </button>
@@ -731,9 +1162,81 @@
         </button>
       </div>
 
+      <div
+        id="tag-curation-menu"
+        class="context-menu"
+        role="menu"
+        aria-label="Tag curation tools"
+        hidden
+      >
+        <button type="button" role="menuitem" data-curation="show-single">
+          <span data-i18n="showSingleUseTags">Show single-use tags (1×)</span>
+        </button>
+        <button type="button" role="menuitem" data-curation="show-colored">
+          <span data-i18n="showColoredTags">Show colored tags</span>
+        </button>
+        <span class="menu-separator" role="separator"></span>
+        <button
+          id="curation-remove-auto"
+          class="danger-menu-item"
+          type="button"
+          role="menuitem"
+          data-curation="remove-all-auto"
+        >
+          <span data-i18n="removeAllAutomaticTags"
+            >Remove all automatic tags in library…</span
+          >
+        </button>
+      </div>
+
+      <div
+        id="columns-menu"
+        class="context-menu columns-menu"
+        role="menu"
+        aria-label="Visible columns"
+        hidden
+      ></div>
+
+      <div
+        id="item-context-menu"
+        class="context-menu"
+        role="menu"
+        aria-label="Item actions"
+        hidden
+      >
+        <button type="button" role="menuitem" data-item-action="open-file">
+          <span data-i18n="openFile">Open file</span>
+        </button>
+        <button type="button" role="menuitem" data-item-action="show-zotero">
+          <span data-i18n="showInZotero">Open in Zotero</span>
+        </button>
+        <span class="menu-separator" role="separator"></span>
+        <button type="button" role="menuitem" data-item-action="copy-citekey">
+          <span data-i18n="copyCitekeyAction">Copy CiteKey</span>
+        </button>
+        <button type="button" role="menuitem" data-item-action="copy-citation">
+          <span data-i18n="copyCitation">Copy citation</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          data-item-action="copy-bibliography"
+        >
+          <span data-i18n="copyBibliography">Copy bibliography</span>
+        </button>
+        <div id="item-context-colored-section" hidden>
+          <span class="menu-separator" role="separator"></span>
+          <div
+            id="item-context-colored-slots"
+            class="context-color-slots"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Native Modal Dialogs (no role="dialog" or aria-modal per HTML spec) -->
       <dialog
         id="tag-action-dialog"
-        class="tag-action-dialog"
+        class="modal-dialog tag-action-dialog"
         aria-labelledby="tag-action-title"
         aria-describedby="tag-action-description"
       >
@@ -792,6 +1295,182 @@
             </button>
           </footer>
         </form>
+      </dialog>
+
+      <dialog
+        id="tag-color-dialog"
+        class="modal-dialog"
+        aria-labelledby="tag-color-title"
+      >
+        <form id="tag-color-form" aria-busy="false">
+          <header class="dialog-header">
+            <h2 id="tag-color-title" data-i18n="assignColorTitle">
+              Assign tag color
+            </h2>
+            <button
+              id="tag-color-close"
+              class="icon-button compact"
+              type="button"
+              data-i18n-title="dismiss"
+              aria-label="Dismiss"
+            >
+              <img
+                class="icon"
+                src="chrome://zotero/skin/16/universal/x-8.svg"
+                alt=""
+              />
+            </button>
+          </header>
+          <div class="dialog-content">
+            <p id="tag-color-description"></p>
+            <div
+              id="tag-color-swatches"
+              class="color-palette-grid"
+              role="radiogroup"
+              aria-label="Color palette"
+            ></div>
+            <div class="color-custom-row">
+              <label class="stacked-dialog-field" for="tag-color-hex">
+                <span data-i18n="customColorHex">Color (Hex)</span>
+                <div class="hex-picker-control">
+                  <input id="tag-color-picker" type="color" value="#2ea8e5" />
+                  <input
+                    id="tag-color-hex"
+                    type="text"
+                    value="#2ea8e5"
+                    maxlength="7"
+                    autocomplete="off"
+                  />
+                </div>
+              </label>
+              <label class="stacked-dialog-field" for="tag-color-position">
+                <span data-i18n="shortcutPosition"
+                  >Shortcut position (1–9)</span
+                >
+                <select id="tag-color-position"></select>
+              </label>
+            </div>
+            <p
+              id="tag-color-error"
+              class="dialog-error"
+              role="alert"
+              hidden
+            ></p>
+          </div>
+          <footer class="dialog-actions">
+            <button
+              id="tag-color-remove"
+              class="danger-outline-button"
+              type="button"
+              data-i18n="removeTagColor"
+            >
+              Remove color
+            </button>
+            <div class="toolbar-spacer"></div>
+            <button id="tag-color-cancel" type="button" data-i18n="cancel">
+              Cancel
+            </button>
+            <button
+              id="tag-color-confirm"
+              class="primary-button"
+              type="submit"
+              data-i18n="saveColor"
+            >
+              Set color
+            </button>
+          </footer>
+        </form>
+      </dialog>
+
+      <dialog
+        id="save-query-dialog"
+        class="modal-dialog"
+        aria-labelledby="save-query-title"
+      >
+        <form id="save-query-form" aria-busy="false">
+          <header class="dialog-header">
+            <h2 id="save-query-title">Save view</h2>
+            <button
+              id="save-query-close"
+              class="icon-button compact"
+              type="button"
+              data-i18n-title="dismiss"
+              aria-label="Dismiss"
+            >
+              <img
+                class="icon"
+                src="chrome://zotero/skin/16/universal/x-8.svg"
+                alt=""
+              />
+            </button>
+          </header>
+          <div class="dialog-content">
+            <p id="save-query-description"></p>
+            <label class="stacked-dialog-field" for="save-query-name">
+              <span id="save-query-label" data-i18n="savedFilterName"
+                >Name</span
+              >
+              <input id="save-query-name" type="text" autocomplete="off" />
+            </label>
+            <p
+              id="save-query-error"
+              class="dialog-error"
+              role="alert"
+              hidden
+            ></p>
+          </div>
+          <footer class="dialog-actions">
+            <button id="save-query-cancel" type="button" data-i18n="cancel">
+              Cancel
+            </button>
+            <button
+              id="save-query-confirm"
+              class="primary-button"
+              type="submit"
+              data-i18n="save"
+            >
+              Save
+            </button>
+          </footer>
+        </form>
+      </dialog>
+
+      <dialog
+        id="shortcuts-dialog"
+        class="modal-dialog shortcuts-dialog"
+        aria-labelledby="shortcuts-title"
+      >
+        <div class="dialog-shell">
+          <header class="dialog-header">
+            <h2 id="shortcuts-title" data-i18n="keyboardShortcuts">
+              Keyboard &amp; pointer shortcuts
+            </h2>
+            <button
+              id="shortcuts-close"
+              class="icon-button compact"
+              type="button"
+              data-i18n-title="dismiss"
+              aria-label="Dismiss"
+            >
+              <img
+                class="icon"
+                src="chrome://zotero/skin/16/universal/x-8.svg"
+                alt=""
+              />
+            </button>
+          </header>
+          <div class="dialog-content shortcuts-grid" id="shortcuts-list"></div>
+          <footer class="dialog-actions">
+            <button
+              id="shortcuts-ok"
+              class="primary-button"
+              type="button"
+              data-i18n="dismiss"
+            >
+              Close
+            </button>
+          </footer>
+        </div>
       </dialog>
 
       <div id="loading-overlay" class="loading-overlay" role="status">

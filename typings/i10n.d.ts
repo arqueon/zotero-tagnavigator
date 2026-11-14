@@ -3,6 +3,13 @@
 /* eslint-disable */
 // @ts-nocheck
 export type FluentMessageId =
+  | 'pref-density-comfortable'
+  | 'pref-density-compact'
+  | 'pref-density-label'
+  | 'pref-double-click-label'
+  | 'pref-double-click-none'
+  | 'pref-double-click-open-attachment'
+  | 'pref-double-click-select-zotero'
   | 'pref-help'
   | 'pref-hide-automatic-tags'
   | 'pref-launcher-endpoint'
