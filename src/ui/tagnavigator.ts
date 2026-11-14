@@ -1,24 +1,36 @@
 import type {
+  AdvancedSearchCondition,
+  CollectionOption,
+  ColoredTagSlot,
   CopyKind,
+  DoubleClickAction,
+  InterfaceDensity,
   ItemColumnKey,
   ItemColumnWidths,
   ItemDetails,
   ItemScope,
   ItemSummary,
   NavigatorBootstrap,
+  QuickSearchMode,
   SavedFilterPreset,
   SavedFiltersByLibrary,
-  TagNavigatorAPI,
+  SavedSearchOption,
+  SearchConditionDefinition,
+  SearchJoinMode,
   TagMutationResult,
+  TagNavigatorAPI,
   TagOverview,
   TagSummary,
+  UnifiedItemQuery,
 } from "../types/tagNavigator";
 import {
   clampItemColumnWidth,
   completeItemColumnWidths,
   DEFAULT_ITEM_COLUMN_WIDTHS,
+  DEFAULT_VISIBLE_ITEM_COLUMNS,
   getItemColumnLimits,
   ITEM_COLUMN_KEYS,
+  sanitizeVisibleItemColumns,
 } from "../utils/itemColumns";
 import { formatItemTimestamp, isItemTimestampInRange } from "../utils/itemDate";
 import {
@@ -27,8 +39,17 @@ import {
   type ItemSortKey,
 } from "../utils/itemSort";
 import {
+  getContrastingTextColor,
+  MAX_COLORED_TAG_SLOTS,
+  normalizeHexColor,
+  ZOTERO_TAG_PALETTE,
+} from "../utils/tagColor";
+import {
+  hasTagNavigatorTagDrag,
   hasZoteroItemDrag,
   parseZoteroItemDrop,
+  serializeZoteroItemDrag,
+  TAGNAVIGATOR_TAG_DRAG_TYPE,
   ZOTERO_ITEM_DRAG_TYPE,
 } from "../utils/zoteroDrag";
 
@@ -37,13 +58,20 @@ import {
 declare const window: WindowProxy;
 declare const document: Document;
 
-type TagActionMode = "rename" | "merge" | "delete";
+type TagActionMode =
+  "rename" | "merge" | "delete" | "convertToManual" | "removeAllAutomatic";
+
+type TagKindFilter = "all" | "manual" | "automatic" | "colored" | "single";
+type TagSortMode = "name" | "count" | "color";
+type SaveQueryMode = "view" | "zoteroSearch";
 
 type TagListEntry = {
   key: string;
   label: string;
   count: number;
   kind: "manual" | "automatic" | "mixed" | "untagged";
+  color?: string;
+  colorPosition?: number;
   scope: ItemScope;
 };
 
@@ -51,18 +79,38 @@ type TranslationValue = string;
 type TranslationTable = Record<string, TranslationValue>;
 
 const APA_STYLE_ID = "http://www.zotero.org/styles/apa";
+const DEFAULT_LEFT_PANE_WIDTH = 276;
+const DEFAULT_RIGHT_PANE_WIDTH = 328;
 
 const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
   en: {
     library: "Library",
+    collectionOrSearch: "Collection or Saved Search",
+    allItemsScope: "All items",
+    unfiledItemsScope: "Unfiled items",
+    collectionsGroup: "Collections",
+    savedSearchesGroup: "Saved Searches",
     refresh: "Refresh",
+    toggleTagPane: "Toggle tag pane",
+    toggleDensity: "Toggle compact / comfortable density",
+    keyboardShortcuts: "Keyboard & pointer shortcuts",
     toggleInspector: "Toggle item pane",
     closeInspector: "Close item pane",
-    dismiss: "Dismiss",
+    resizePane: "Drag to resize pane · Double-click to reset",
+    dismiss: "Close",
     retry: "Retry",
     tags: "Tags",
+    tagCurationTools: "Tag curation tools",
+    tagFilterAll: "All",
+    tagFilterAuto: "Auto",
+    tagFilterColored: "Colored",
+    tagFilterSingle: "1×",
+    sortTags: "Sort tags",
+    sortName: "A–Z",
+    sortCount: "Count",
+    sortColor: "Color",
     searchTags: "Search tags",
-    searchItems: "Title, creator, abstract or CiteKey",
+    searchItems: "Filter items…",
     clearSearch: "Clear search",
     hideAutomatic: "Hide automatic tags",
     manual: "Manual",
@@ -71,9 +119,33 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     selectTag: "Select a tag",
     allLibrary: "All library",
     recentItems: "Recently modified",
-    recentItemsStatus:
-      "{visible} visible · {shown} most recent of {total} items",
-    deselectTag: "Select again to search the whole library",
+    recentItemsStatus: "{visible} visible · {shown} loaded of {total} items",
+    deselectTag:
+      "Click again to clear · Ctrl+Click for AND · Alt+Click for NOT",
+    booleanTagHint: "Click: select · Ctrl+Click: AND (+) · Alt+Click: NOT (−)",
+    dropTagHint: "Drop items to add tag · Hold Alt while dropping to remove",
+    dropTagApplied: "Added “{tag}” to {count} items",
+    dropTagRemoved: "Removed “{tag}” from {count} items",
+    quickSearchMode: "Quick search mode",
+    quickSearchFields: "Fields & Tags",
+    quickSearchTitleCreatorYear: "Title, Creator, Year",
+    quickSearchEverything: "Everything",
+    advancedSearch: "Advanced",
+    matchConditions: "Match",
+    matchAll: "all (AND)",
+    matchAny: "any (OR)",
+    includeSubcollections: "Include subcollections",
+    addCondition: "+ Condition",
+    clearConditions: "Reset",
+    saveViewEllipsis: "Save view…",
+    saveZoteroSearchEllipsis: "Save Zotero Search…",
+    runSearch: "Search",
+    removeCondition: "Remove condition",
+    clearAllFilters: "Clear all",
+    columnsMenu: "Visible columns",
+    loadMoreItems: "Load more",
+    loadMoreItemsCount: "Load more (+{count})",
+    loadAllItems: "Load all ({total})",
     filters: "Filters",
     author: "Author",
     allAuthors: "All authors",
@@ -88,26 +160,27 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     savedFilters: "Saved views",
     saveView: "Save view",
     deleteView: "Delete view",
-    savedFilterName: "Name this saved view",
+    save: "Save",
+    savedFilterName: "Saved view name",
+    saveViewDescription:
+      "Save the active tags, scope, search conditions, and quick filters in Tag Navigator.",
+    saveZoteroSearchTitle: "Save Zotero Saved Search",
+    saveZoteroSearchName: "Saved Search name",
+    saveZoteroSearchDescription:
+      "Create a native Zotero Saved Search in this library from the active query.",
     savedFilterSaved: "Saved view: {name}",
+    zoteroSearchSaved: "Saved Zotero Search: {name}",
     savedFilterDeleted: "Deleted saved view: {name}",
     savedFilterMissingTag:
       "This saved view references a tag that no longer exists: {tag}",
-    savedFilterNeedsTag: "Choose a primary tag before saving this view.",
-    dropTagHint: "Drop Zotero items to add this tag",
-    dropTagApplied: "Added “{tag}” to {count} items",
-    searchLibrary: "Search the whole library",
-    searchLibraryTitle: "Search the whole library",
-    searchLibraryBody:
-      "Enter metadata, a creator, tag, note, DOI or CiteKey. Nothing is loaded until you search.",
+    searchLibrary: "Search library…",
     searchingLibrary: "Searching library…",
-    libraryItemCount: "{count} items in this library",
-    librarySearchStatus: "{visible} of {total} matches",
+    librarySearchStatus: "{visible} visible of {total} matches",
     librarySearchLimitedStatus:
       "{visible} visible · {shown} loaded of {total} matches",
-    chooseTagTitle: "Choose a tag to begin",
+    chooseTagTitle: "Choose a tag or run a search",
     chooseTagBody:
-      "Combine a tag with text, author, year, PDF, notes and another tag.",
+      "Combine tags (AND / NOT), collections, quick search, or Zotero Advanced Search.",
     noItemsTitle: "No matching items",
     noItemsBody: "Change or clear one of the active filters.",
     emptyTagTitle: "This tag has no items",
@@ -115,6 +188,9 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     title: "Title",
     creator: "Creator",
     year: "Year",
+    publication: "Publication",
+    itemType: "Item type",
+    citekey: "CiteKey",
     dateAdded: "Date Added",
     dateModified: "Date Modified",
     dateAddedRange: "Date Added · From → To",
@@ -131,17 +207,19 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     batchTags: "Batch tags",
     showInZotero: "Open in Zotero",
     openFile: "Open file",
+    abstract: "Abstract",
     info: "Info",
-    itemType: "Item type",
     date: "Date",
-    publication: "Publication",
+    collections: "Collections",
     addTag: "Add tag",
+    coloredTagsShortcut: "Colored tags (1–9)",
     frequentTags: "Frequent tags",
     quickCopy: "Quick Copy",
     citationStyle: "Citation style",
     zettlrCitationFormat: "Zettlr citation format",
     zettlrFormatHint: "CiteKey will be copied as {format}",
     zettlrConfigUnavailable: "Zettlr configuration not found",
+    copyCitekeyAction: "Copy CiteKey",
     copyCitation: "Copy citation",
     copyBibliography: "Copy bibliography",
     copyAPA: "Copy APA references",
@@ -155,7 +233,6 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     notAvailable: "—",
     tagStatus: "{visible} of {total}",
     itemStatus: "{visible} of {total} items",
-    tagCount: "{count} tags",
     copiedCitekey: "CiteKey copied",
     copiedZettlrCitation: "Zettlr citation copied",
     copiedCitation: "Citation copied",
@@ -169,18 +246,43 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     batchTagAdded: "Added “{tag}” to {count} items",
     batchTagRemoved: "Removed “{tag}” from {count} items",
     tagActions: "Tag actions",
+    filterIncludeTag: "Filter with AND (+)",
+    filterExcludeTag: "Exclude with NOT (−)",
+    assignTagColor: "Assign / change color (1–9)…",
+    removeTagColor: "Remove color",
+    convertAutoToManual: "Convert automatic → manual…",
+    showSingleUseTags: "Show single-use tags (1×)",
+    showColoredTags: "Show colored tags",
+    removeAllAutomaticTags: "Remove all automatic tags in library…",
+    assignColorTitle: "Assign tag color",
+    assignColorDescription:
+      "Choose a color and shortcut slot (1–9) for “{tag}”.",
+    customColorHex: "Color (Hex)",
+    shortcutPosition: "Shortcut position (1–9)",
+    slotFree: "{pos} — Available",
+    slotCurrent: "{pos} — {tag} (current)",
+    slotUsed: "{pos} — {tag}",
+    saveColor: "Set color",
+    tagColorSaved: "Assigned color #{pos} to “{tag}”",
+    tagColorRemoved: "Removed color from “{tag}”",
     renameTag: "Rename tag…",
     mergeTag: "Merge into…",
     deleteTag: "Remove tag from library…",
     renameTagTitle: "Rename tag",
     mergeTagTitle: "Merge tags",
     deleteTagTitle: "Remove tag from library",
+    convertAutoTitle: "Convert automatic tag to manual",
+    removeAllAutoTitle: "Remove all automatic tags",
     renameTagDescription:
       "Rename “{tag}” across {count} items in this library.",
     mergeTagDescription:
       "Merge “{tag}” into an existing tag across {count} items. Zotero will resolve duplicate assignments.",
     deleteTagDescription:
       "Remove “{tag}” from {count} items in this library. No items or files will be deleted.",
+    convertAutoDescription:
+      "Convert automatic occurrences of “{tag}” ({count} items) into manual tags.",
+    removeAllAutoDescription:
+      "Remove all automatic (imported) tags across {count} tag entries in this library. Manual tags and items are kept.",
     newTagName: "New tag name",
     mergeTarget: "Existing destination tag",
     mergeTargetPlaceholder: "Search destination tags",
@@ -188,9 +290,13 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     confirmRename: "Rename",
     confirmMerge: "Merge tags",
     confirmDelete: "Remove tag",
+    confirmConvertAuto: "Convert to manual",
+    confirmRemoveAllAuto: "Remove automatic tags",
     tagRenamed: "Renamed “{source}” to “{target}” on {count} items",
     tagsMerged: "Merged “{source}” into “{target}” on {count} items",
     libraryTagDeleted: "Removed “{tag}” from {count} items",
+    tagConvertedManual: "Converted “{tag}” to manual on {count} items",
+    allAutoTagsRemoved: "Removed automatic tags from {count} items",
     noAttachment: "No readable attachment was found",
     readOnlyLibrary: "This library is read-only",
     noCitekey: "This item has no CiteKey",
@@ -203,6 +309,12 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     errorZettlrConfig:
       "Zettlr's citation format could not be read from its configuration.",
     errorEmptyTag: "Enter a tag name.",
+    errorEmptySearchName: "Enter a name first.",
+    errorNoSearchConditions:
+      "Add at least one tag, search term, collection, or condition first.",
+    errorMaxColoredTags:
+      "Zotero supports at most 9 colored tags per library. Remove a color from an existing slot first.",
+    errorInvalidColor: "Enter a valid 6-digit hex color (e.g. #2ea8e5).",
     errorLongTag: "The tag is longer than Zotero allows.",
     errorTagNotFound: "The source tag is no longer present in this library.",
     errorTagExists:
@@ -210,17 +322,60 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     errorMergeTarget: "Choose an existing destination tag from this library.",
     errorSameTag: "The source and destination tags must be different.",
     showingLibrary: "{name}",
+    dragItemsBadge: "{count} items",
+    op_is: "is",
+    op_isNot: "is not",
+    op_contains: "contains",
+    op_doesNotContain: "does not contain",
+    op_beginsWith: "begins with",
+    op_isBefore: "is before",
+    op_isAfter: "is after",
+    op_isInTheLast: "is in the last",
+    op_isLessThan: "is less than",
+    op_isGreaterThan: "is greater than",
+    op_isEmpty: "is empty",
+    op_isNotEmpty: "is not empty",
+    op_true: "is true",
+    op_false: "is false",
+    sc_clickTag: "Select primary tag (click again to clear)",
+    sc_ctrlClickTag: "Add / remove tag in boolean AND (+) filter",
+    sc_altClickTag: "Exclude / unexclude tag with boolean NOT (−)",
+    sc_dragItems: "Assign tag to dragged items (Alt+Drop removes tag)",
+    sc_dragTag: "Assign dragged tag onto an item row or inspector",
+    sc_numKeys: "Toggle colored tag slot 1–9 on selected items",
+    sc_ctrlNumKeys: "Add frequent tag 1–5 to selected items",
+    sc_copyKey: "Copy CiteKey (or Zettlr format) for selected items",
+    sc_searchKey: "Focus quick search input",
+    sc_doubleClick: "Open best attachment (configurable in Settings)",
   },
   es: {
     library: "Biblioteca",
+    collectionOrSearch: "Colección o búsqueda guardada",
+    allItemsScope: "Todos los elementos",
+    unfiledItemsScope: "Elementos sin clasificar",
+    collectionsGroup: "Colecciones",
+    savedSearchesGroup: "Búsquedas guardadas",
     refresh: "Actualizar",
+    toggleTagPane: "Mostrar u ocultar panel de etiquetas",
+    toggleDensity: "Alternar densidad compacta o cómoda",
+    keyboardShortcuts: "Atajos de teclado y ratón",
     toggleInspector: "Mostrar u ocultar panel de información",
     closeInspector: "Cerrar panel de información",
+    resizePane: "Arrastra para redimensionar · Doble clic para restaurar",
     dismiss: "Cerrar",
     retry: "Reintentar",
     tags: "Etiquetas",
+    tagCurationTools: "Herramientas de curación de etiquetas",
+    tagFilterAll: "Todas",
+    tagFilterAuto: "Auto",
+    tagFilterColored: "Color",
+    tagFilterSingle: "1×",
+    sortTags: "Ordenar etiquetas",
+    sortName: "A–Z",
+    sortCount: "Uso",
+    sortColor: "Color",
     searchTags: "Buscar etiquetas",
-    searchItems: "Título, autor, resumen o CiteKey",
+    searchItems: "Filtrar elementos…",
     clearSearch: "Borrar búsqueda",
     hideAutomatic: "Ocultar etiquetas automáticas",
     manual: "Manual",
@@ -230,8 +385,35 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     allLibrary: "Toda la biblioteca",
     recentItems: "Modificados recientemente",
     recentItemsStatus:
-      "{visible} visibles · {shown} más recientes de {total} elementos",
-    deselectTag: "Selecciona de nuevo para buscar en toda la biblioteca",
+      "{visible} visibles · {shown} cargados de {total} elementos",
+    deselectTag:
+      "Clic de nuevo para limpiar · Ctrl+Clic para Y · Alt+Clic para NO",
+    booleanTagHint:
+      "Clic: elegir · Ctrl+Clic: Y (+) · Alt+Clic: excluir NO (−)",
+    dropTagHint:
+      "Suelta elementos para etiquetar · Mantén Alt al soltar para quitar",
+    dropTagApplied: "Se añadió «{tag}» a {count} elementos",
+    dropTagRemoved: "Se quitó «{tag}» de {count} elementos",
+    quickSearchMode: "Modo de búsqueda rápida",
+    quickSearchFields: "Campos y etiquetas",
+    quickSearchTitleCreatorYear: "Título, autor, año",
+    quickSearchEverything: "Todo",
+    advancedSearch: "Avanzada",
+    matchConditions: "Cumplir",
+    matchAll: "todas (AND)",
+    matchAny: "cualquiera (OR)",
+    includeSubcollections: "Incluir subcolecciones",
+    addCondition: "+ Condición",
+    clearConditions: "Reiniciar",
+    saveViewEllipsis: "Guardar vista…",
+    saveZoteroSearchEllipsis: "Guardar en Zotero…",
+    runSearch: "Buscar",
+    removeCondition: "Quitar condición",
+    clearAllFilters: "Limpiar todo",
+    columnsMenu: "Columnas visibles",
+    loadMoreItems: "Cargar más",
+    loadMoreItemsCount: "Cargar más (+{count})",
+    loadAllItems: "Cargar todos ({total})",
     filters: "Filtros",
     author: "Autor",
     allAuthors: "Todos los autores",
@@ -246,27 +428,27 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     savedFilters: "Vistas guardadas",
     saveView: "Guardar vista",
     deleteView: "Eliminar vista",
+    save: "Guardar",
     savedFilterName: "Nombre de la vista guardada",
+    saveViewDescription:
+      "Guarda en Tag Navigator las etiquetas, colección, condiciones y filtros rápidos activos.",
+    saveZoteroSearchTitle: "Guardar búsqueda en Zotero",
+    saveZoteroSearchName: "Nombre de la búsqueda guardada",
+    saveZoteroSearchDescription:
+      "Crea una búsqueda guardada nativa de Zotero en esta biblioteca con la consulta actual.",
     savedFilterSaved: "Vista guardada: {name}",
+    zoteroSearchSaved: "Búsqueda guardada en Zotero: {name}",
     savedFilterDeleted: "Vista guardada eliminada: {name}",
     savedFilterMissingTag:
       "Esta vista guardada usa una etiqueta que ya no existe: {tag}",
-    savedFilterNeedsTag:
-      "Elige una etiqueta principal antes de guardar esta vista.",
-    dropTagHint: "Suelta ítems de Zotero para añadir esta etiqueta",
-    dropTagApplied: "Se añadió «{tag}» a {count} ítems",
-    searchLibrary: "Buscar en toda la biblioteca",
-    searchLibraryTitle: "Busca en toda la biblioteca",
-    searchLibraryBody:
-      "Escribe metadatos, un autor, etiqueta, nota, DOI o CiteKey. No se carga nada hasta que busques.",
+    searchLibrary: "Buscar en la biblioteca…",
     searchingLibrary: "Buscando en la biblioteca…",
-    libraryItemCount: "{count} elementos en esta biblioteca",
-    librarySearchStatus: "{visible} de {total} coincidencias",
+    librarySearchStatus: "{visible} visibles de {total} coincidencias",
     librarySearchLimitedStatus:
       "{visible} visibles · {shown} cargados de {total} coincidencias",
-    chooseTagTitle: "Elige una etiqueta para comenzar",
+    chooseTagTitle: "Elige una etiqueta o ejecuta una búsqueda",
     chooseTagBody:
-      "Combina una etiqueta con texto, autor, año, PDF, notas y una segunda etiqueta.",
+      "Combina etiquetas (AND / NOT), colecciones, búsqueda rápida o búsqueda avanzada de Zotero.",
     noItemsTitle: "No hay elementos coincidentes",
     noItemsBody: "Cambia o limpia alguno de los filtros activos.",
     emptyTagTitle: "Esta etiqueta no contiene elementos",
@@ -275,6 +457,9 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     title: "Título",
     creator: "Autor",
     year: "Año",
+    publication: "Publicación",
+    itemType: "Tipo de elemento",
+    citekey: "CiteKey",
     dateAdded: "Fecha de añadido",
     dateModified: "Fecha de modificación",
     dateAddedRange: "Fecha de añadido · Desde → Hasta",
@@ -291,17 +476,19 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     batchTags: "Etiquetas por lotes",
     showInZotero: "Abrir en Zotero",
     openFile: "Abrir archivo",
+    abstract: "Resumen",
     info: "Información",
-    itemType: "Tipo de elemento",
     date: "Fecha",
-    publication: "Publicación",
+    collections: "Colecciones",
     addTag: "Añadir etiqueta",
+    coloredTagsShortcut: "Etiquetas de color (1–9)",
     frequentTags: "Etiquetas frecuentes",
     quickCopy: "Copiado rápido",
     citationStyle: "Estilo de cita",
     zettlrCitationFormat: "Formato de cita de Zettlr",
     zettlrFormatHint: "La CiteKey se copiará como {format}",
     zettlrConfigUnavailable: "No se encontró la configuración de Zettlr",
+    copyCitekeyAction: "Copiar CiteKey",
     copyCitation: "Copiar cita",
     copyBibliography: "Copiar bibliografía",
     copyAPA: "Copiar referencias APA",
@@ -315,7 +502,6 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     notAvailable: "—",
     tagStatus: "{visible} de {total}",
     itemStatus: "{visible} de {total} elementos",
-    tagCount: "{count} etiquetas",
     copiedCitekey: "CiteKey copiada",
     copiedZettlrCitation: "Cita para Zettlr copiada",
     copiedCitation: "Cita copiada",
@@ -326,21 +512,47 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
       "Se copiaron {count} CiteKeys; {missing} elementos seleccionados no tenían CiteKey",
     tagAdded: "Etiqueta añadida: {tag}",
     tagRemoved: "Etiqueta eliminada: {tag}",
-    batchTagAdded: "Se añadió “{tag}” a {count} elementos",
-    batchTagRemoved: "Se quitó “{tag}” de {count} elementos",
+    batchTagAdded: "Se añadió «{tag}» a {count} elementos",
+    batchTagRemoved: "Se quitó «{tag}» de {count} elementos",
     tagActions: "Acciones de etiqueta",
+    filterIncludeTag: "Filtrar con AND (+)",
+    filterExcludeTag: "Excluir con NOT (−)",
+    assignTagColor: "Asignar o cambiar color (1–9)…",
+    removeTagColor: "Quitar color",
+    convertAutoToManual: "Convertir automática → manual…",
+    showSingleUseTags: "Ver etiquetas de un solo uso (1×)",
+    showColoredTags: "Ver etiquetas con color",
+    removeAllAutomaticTags:
+      "Eliminar todas las etiquetas automáticas de la biblioteca…",
+    assignColorTitle: "Asignar color de etiqueta",
+    assignColorDescription:
+      "Elige un color y posición rápida (1–9) para «{tag}».",
+    customColorHex: "Color (Hex)",
+    shortcutPosition: "Posición de atajo (1–9)",
+    slotFree: "{pos} — Disponible",
+    slotCurrent: "{pos} — {tag} (actual)",
+    slotUsed: "{pos} — {tag}",
+    saveColor: "Guardar color",
+    tagColorSaved: "Se asignó el color #{pos} a «{tag}»",
+    tagColorRemoved: "Se quitó el color de «{tag}»",
     renameTag: "Renombrar etiqueta…",
     mergeTag: "Fusionar con…",
     deleteTag: "Quitar etiqueta de la biblioteca…",
     renameTagTitle: "Renombrar etiqueta",
     mergeTagTitle: "Fusionar etiquetas",
     deleteTagTitle: "Quitar etiqueta de la biblioteca",
+    convertAutoTitle: "Convertir etiqueta automática en manual",
+    removeAllAutoTitle: "Eliminar todas las etiquetas automáticas",
     renameTagDescription:
-      "Renombra “{tag}” en {count} elementos de esta biblioteca.",
+      "Renombra «{tag}» en {count} elementos de esta biblioteca.",
     mergeTagDescription:
-      "Fusiona “{tag}” con una etiqueta existente en {count} elementos. Zotero resolverá las asignaciones duplicadas.",
+      "Fusiona «{tag}» con una etiqueta existente en {count} elementos. Zotero resolverá las asignaciones duplicadas.",
     deleteTagDescription:
-      "Quita “{tag}” de {count} elementos de esta biblioteca. No se eliminarán elementos ni archivos.",
+      "Quita «{tag}» de {count} elementos de esta biblioteca. No se eliminarán elementos ni archivos.",
+    convertAutoDescription:
+      "Convierte las apariciones automáticas de «{tag}» ({count} elementos) en etiquetas manuales.",
+    removeAllAutoDescription:
+      "Elimina todas las etiquetas automáticas (importadas) en {count} entradas de esta biblioteca. Las etiquetas manuales y los elementos se conservan.",
     newTagName: "Nuevo nombre de etiqueta",
     mergeTarget: "Etiqueta de destino existente",
     mergeTargetPlaceholder: "Buscar etiquetas de destino",
@@ -348,9 +560,14 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     confirmRename: "Renombrar",
     confirmMerge: "Fusionar etiquetas",
     confirmDelete: "Quitar etiqueta",
-    tagRenamed: "Se renombró “{source}” como “{target}” en {count} elementos",
-    tagsMerged: "Se fusionó “{source}” con “{target}” en {count} elementos",
-    libraryTagDeleted: "Se quitó “{tag}” de {count} elementos",
+    confirmConvertAuto: "Convertir en manual",
+    confirmRemoveAllAuto: "Eliminar automáticas",
+    tagRenamed: "Se renombró «{source}» como «{target}» en {count} elementos",
+    tagsMerged: "Se fusionó «{source}» con «{target}» en {count} elementos",
+    libraryTagDeleted: "Se quitó «{tag}» de {count} elementos",
+    tagConvertedManual: "Se convirtió «{tag}» en manual en {count} elementos",
+    allAutoTagsRemoved:
+      "Se eliminaron etiquetas automáticas en {count} elementos",
     noAttachment: "No se encontró un adjunto legible",
     readOnlyLibrary: "Esta biblioteca es de sólo lectura",
     noCitekey: "Este elemento no tiene CiteKey",
@@ -364,6 +581,12 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
     errorZettlrConfig:
       "No se pudo leer el formato de cita desde la configuración de Zettlr.",
     errorEmptyTag: "Escribe el nombre de una etiqueta.",
+    errorEmptySearchName: "Escribe un nombre primero.",
+    errorNoSearchConditions:
+      "Añade al menos una etiqueta, texto de búsqueda, colección o condición primero.",
+    errorMaxColoredTags:
+      "Zotero admite hasta 9 etiquetas con color por biblioteca. Quita primero el color de otra etiqueta.",
+    errorInvalidColor: "Escribe un color hexadecimal válido (p. ej. #2ea8e5).",
     errorLongTag: "La etiqueta supera la longitud permitida por Zotero.",
     errorTagNotFound:
       "La etiqueta de origen ya no está presente en esta biblioteca.",
@@ -373,8 +596,36 @@ const TRANSLATIONS: Record<"en" | "es", TranslationTable> = {
       "Elige una etiqueta de destino que exista en esta biblioteca.",
     errorSameTag: "Las etiquetas de origen y destino deben ser diferentes.",
     showingLibrary: "{name}",
+    dragItemsBadge: "{count} elementos",
+    op_is: "es",
+    op_isNot: "no es",
+    op_contains: "contiene",
+    op_doesNotContain: "no contiene",
+    op_beginsWith: "empieza por",
+    op_isBefore: "es anterior a",
+    op_isAfter: "es posterior a",
+    op_isInTheLast: "está en los últimos",
+    op_isLessThan: "es menor que",
+    op_isGreaterThan: "es mayor que",
+    op_isEmpty: "está vacío",
+    op_isNotEmpty: "no está vacío",
+    op_true: "es verdadero",
+    op_false: "es falso",
+    sc_clickTag: "Seleccionar etiqueta principal (clic de nuevo para limpiar)",
+    sc_ctrlClickTag: "Añadir o quitar etiqueta en filtro booleano AND (+)",
+    sc_altClickTag: "Excluir o incluir etiqueta con filtro booleano NOT (−)",
+    sc_dragItems:
+      "Asignar etiqueta a elementos arrastrados (Alt+Soltar la quita)",
+    sc_dragTag: "Asignar etiqueta arrastrada sobre una fila o el inspector",
+    sc_numKeys: "Alternar etiqueta de color 1–9 en los elementos seleccionados",
+    sc_ctrlNumKeys: "Añadir etiqueta frecuente 1–5 a la selección",
+    sc_copyKey: "Copiar CiteKey (o formato Zettlr) de la selección",
+    sc_searchKey: "Enfocar el cuadro de búsqueda rápida",
+    sc_doubleClick: "Abrir mejor adjunto (configurable en Ajustes)",
   },
 };
+
+const UNARY_OPERATORS = new Set(["isEmpty", "isNotEmpty", "true", "false"]);
 
 class VirtualList<T> {
   private items: T[] = [];
@@ -385,7 +636,7 @@ class VirtualList<T> {
     private readonly container: HTMLElement,
     private readonly spacer: HTMLElement,
     private readonly windowElement: HTMLElement,
-    private readonly rowHeight: number,
+    private rowHeight: number,
     private readonly renderRow: (item: T, index: number) => HTMLElement,
   ) {
     this.container.addEventListener("scroll", () => this.scheduleRender());
@@ -393,17 +644,24 @@ class VirtualList<T> {
     this.resizeObserver.observe(this.container);
   }
 
-  setItems(items: T[]): void {
+  setRowHeight(height: number): void {
+    if (this.rowHeight === height) return;
+    this.rowHeight = height;
+    this.updateSpacerHeight();
+    this.render();
+  }
+
+  setItems(items: T[], preserveScroll = false): void {
     this.items = items;
-    this.spacer.style.height = `${Math.max(
-      this.container.clientHeight,
-      items.length * this.rowHeight,
-    )}px`;
-    this.container.scrollTop = 0;
+    this.updateSpacerHeight();
+    if (!preserveScroll) {
+      this.container.scrollTop = 0;
+    }
     this.render();
   }
 
   refresh(): void {
+    this.updateSpacerHeight();
     this.render();
   }
 
@@ -418,6 +676,13 @@ class VirtualList<T> {
       this.container.scrollTop = rowBottom - this.container.clientHeight;
     }
     this.scheduleRender();
+  }
+
+  private updateSpacerHeight(): void {
+    this.spacer.style.height = `${Math.max(
+      this.container.clientHeight,
+      this.items.length * this.rowHeight,
+    )}px`;
   }
 
   private scheduleRender(): void {
@@ -456,12 +721,37 @@ const windowArgument = (window as any).arguments?.[0];
 const api = (windowArgument?.wrappedJSObject?.api ||
   windowArgument?.api ||
   null) as TagNavigatorAPI | null;
+
 let bootstrap: NavigatorBootstrap | null = null;
 let overview: TagOverview | null = null;
+let collections: CollectionOption[] = [];
+let savedSearches: SavedSearchOption[] = [];
 let currentLibraryID = 0;
-let currentScope: ItemScope | null = null;
+
+// Unified v2 Query State
+let includeTags: string[] = [];
+let excludeTags: string[] = [];
+let untaggedOnly = false;
+let activeCollectionID: number | null = null;
+let unfiledOnly = false;
+let activeSavedSearchID: number | null = null;
+let includeSubcollections = true;
+let quickSearchMode: QuickSearchMode = "fields";
+let joinMode: SearchJoinMode = "all";
+let advancedConditions: AdvancedSearchCondition[] = [];
+
+// Query Result & Facet State
+let queryTotal = 0;
+let queryHasMore = false;
+let facetTagCounts: Record<string, number> = {};
+
+// Tag List UI State
+let tagKindFilter: TagKindFilter = "all";
+let tagSortMode: TagSortMode = "name";
 let currentTagRows: TagListEntry[] = [];
 let visibleTagRows: TagListEntry[] = [];
+
+// Item Table & Selection State
 let allItems: ItemSummary[] = [];
 let visibleItems: ItemSummary[] = [];
 let selectedItemID: number | null = null;
@@ -471,33 +761,55 @@ let selectedDetails: ItemDetails | null = null;
 let frequentTagCandidates: TagSummary[] = [];
 let sortKey: ItemSortKey = "dateModified";
 let sortDirection: ItemSortDirection = "descending";
+
+// Layout & Preferences State
 let itemColumnWidths: ItemColumnWidths = {
   ...DEFAULT_ITEM_COLUMN_WIDTHS,
 };
+let visibleColumns: ItemColumnKey[] = [...DEFAULT_VISIBLE_ITEM_COLUMNS];
+let leftPaneWidth = DEFAULT_LEFT_PANE_WIDTH;
+let rightPaneWidth = DEFAULT_RIGHT_PANE_WIDTH;
+let density: InterfaceDensity = "comfortable";
+let doubleClickAction: DoubleClickAction = "openAttachment";
+let pageSize = 500;
 let language: "en" | "es" = "en";
+
+// Async Tokens & Timers
 let tagLoadToken = 0;
 let itemLoadToken = 0;
 let detailLoadToken = 0;
 let toastTimer = 0;
 let refreshTimer = 0;
+let quickSearchTimer = 0;
 let retryAction: (() => Promise<void>) | null = null;
 let autocompleteIndex = -1;
 let autocompleteMatches: TagSummary[] = [];
 let suppressNotificationsUntil = 0;
-let librarySearchQuery = "";
-let librarySearchTotal = 0;
-let librarySearchLimited = false;
-let libraryResultsMode: "recent" | "search" | null = null;
-let librarySearchTimer = 0;
+
+// Dialog & Menu State
 let tagActionMode: TagActionMode | null = null;
 let tagActionSource: TagSummary | null = null;
 let tagActionAutocompleteMatches: TagSummary[] = [];
 let tagActionAutocompleteIndex = -1;
+let colorDialogSource: TagSummary | null = null;
+let saveQueryMode: SaveQueryMode = "view";
 let savedFilters: SavedFiltersByLibrary = {};
 let applyingSavedFilter = false;
+let activeDragGhost: HTMLElement | null = null;
 
 let tagVirtualList: VirtualList<TagListEntry>;
 let itemVirtualList: VirtualList<ItemSummary>;
+
+const ITEM_COLUMN_CSS_VARIABLES: Record<ItemColumnKey, string> = {
+  title: "--item-column-title",
+  creator: "--item-column-creator",
+  year: "--item-column-year",
+  publication: "--item-column-publication",
+  itemType: "--item-column-item-type",
+  citekey: "--item-column-citekey",
+  dateAdded: "--item-column-date-added",
+  dateModified: "--item-column-date-modified",
+};
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -514,6 +826,11 @@ function translate(
     value = value.replaceAll(`{${name}}`, String(replacement));
   }
   return value;
+}
+
+function translateOperator(operator: string): string {
+  const key = `op_${operator}`;
+  return TRANSLATIONS[language][key] || TRANSLATIONS.en[key] || operator;
 }
 
 function localizeDocument(): void {
@@ -533,8 +850,9 @@ function localizeDocument(): void {
     .forEach((node: HTMLElement) => {
       const title = translate(node.dataset.i18nTitle || "");
       node.title = title;
-      if (node.hasAttribute("aria-label"))
+      if (node.hasAttribute("aria-label")) {
         node.setAttribute("aria-label", title);
+      }
     });
 }
 
@@ -552,6 +870,13 @@ function createIcon(uri: string, className = "icon"): HTMLImageElement {
   image.src = uri;
   image.alt = "";
   return image;
+}
+
+function createOption(value: string, label: string): HTMLOptionElement {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
 }
 
 function initializeVirtualLists(): void {
@@ -586,16 +911,32 @@ async function init(): Promise<void> {
       ? "es"
       : "en";
     localizeDocument();
+
+    const prefs = bootstrap.preferences;
+    doubleClickAction = prefs.doubleClickAction || "openAttachment";
+    pageSize = prefs.pageSize || 500;
+    visibleColumns = sanitizeVisibleItemColumns(prefs.visibleColumns);
+    leftPaneWidth = clampPaneWidth("left", prefs.leftPaneWidth);
+    rightPaneWidth = clampPaneWidth("right", prefs.rightPaneWidth);
+
+    applyPaneWidth("left", leftPaneWidth);
+    applyPaneWidth("right", rightPaneWidth);
+    setTagPaneOpen(prefs.tagPaneOpen !== false, false);
+    setInspectorOpen(prefs.inspectorOpen !== false, false);
+    setDensity(prefs.density || "comfortable", false);
+
     configureItemColumns();
     configureStaticControls();
     configureZettlrCitationFormat();
-    savedFilters = { ...bootstrap.preferences.savedFilters };
+    renderShortcutsDialogContent();
+
+    savedFilters = { ...prefs.savedFilters };
     populateLibraries();
     populateCitationStyles();
-    setInspectorOpen(bootstrap.preferences.inspectorOpen, false);
     element<HTMLInputElement>("hide-automatic-tags").checked =
-      bootstrap.preferences.hideAutomaticTags;
-    await loadLibrary(bootstrap.preferences.selectedLibraryID);
+      prefs.hideAutomaticTags;
+
+    await loadLibrary(prefs.selectedLibraryID);
   } catch (error) {
     showFatalError(error);
   }
@@ -613,20 +954,132 @@ function configureStaticControls(): void {
   }
 }
 
-const ITEM_COLUMN_CSS_VARIABLES: Record<ItemColumnKey, string> = {
-  title: "--item-column-title",
-  creator: "--item-column-creator",
-  year: "--item-column-year",
-  dateAdded: "--item-column-date-added",
-  dateModified: "--item-column-date-modified",
-};
+/* ==========================================================================
+ * Layout, Splitters, Density & Dynamic Columns
+ * ========================================================================== */
+
+function clampPaneWidth(side: "left" | "right", width: number): number {
+  if (!Number.isFinite(width)) {
+    return side === "left" ? DEFAULT_LEFT_PANE_WIDTH : DEFAULT_RIGHT_PANE_WIDTH;
+  }
+  return side === "left"
+    ? Math.max(190, Math.min(480, Math.round(width)))
+    : Math.max(240, Math.min(540, Math.round(width)));
+}
+
+function applyPaneWidth(side: "left" | "right", width: number): void {
+  const clamped = clampPaneWidth(side, width);
+  if (side === "left") {
+    leftPaneWidth = clamped;
+    element("app").style.setProperty("--left-pane-width", `${clamped}px`);
+    element("left-splitter").setAttribute("aria-valuenow", String(clamped));
+  } else {
+    rightPaneWidth = clamped;
+    element("app").style.setProperty("--right-pane-width", `${clamped}px`);
+    element("right-splitter").setAttribute("aria-valuenow", String(clamped));
+  }
+}
+
+function startPaneResize(side: "left" | "right", event: PointerEvent): void {
+  if (event.button !== 0) return;
+  const splitter = event.currentTarget as HTMLElement;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const pointerID = event.pointerId;
+  const startX = event.clientX;
+  const startWidth = side === "left" ? leftPaneWidth : rightPaneWidth;
+  let finished = false;
+
+  const move = (moveEvent: PointerEvent) => {
+    const delta = moveEvent.clientX - startX;
+    applyPaneWidth(
+      side,
+      side === "left" ? startWidth + delta : startWidth - delta,
+    );
+  };
+
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (splitter.hasPointerCapture(pointerID)) {
+      splitter.releasePointerCapture(pointerID);
+    }
+    splitter.classList.remove("active");
+    element("app").classList.remove("pane-resizing");
+    splitter.removeEventListener("pointermove", move);
+    splitter.removeEventListener("pointerup", finish);
+    splitter.removeEventListener("pointercancel", finish);
+    api?.savePreferences(
+      side === "left" ? { leftPaneWidth } : { rightPaneWidth },
+    );
+  };
+
+  splitter.classList.add("active");
+  element("app").classList.add("pane-resizing");
+  splitter.setPointerCapture(pointerID);
+  splitter.addEventListener("pointermove", move);
+  splitter.addEventListener("pointerup", finish);
+  splitter.addEventListener("pointercancel", finish);
+}
+
+function handlePaneSplitterKeyboard(
+  side: "left" | "right",
+  event: KeyboardEvent,
+): void {
+  if (event.key === "Home") {
+    event.preventDefault();
+    applyPaneWidth(
+      side,
+      side === "left" ? DEFAULT_LEFT_PANE_WIDTH : DEFAULT_RIGHT_PANE_WIDTH,
+    );
+    api?.savePreferences(
+      side === "left" ? { leftPaneWidth } : { rightPaneWidth },
+    );
+    return;
+  }
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const step = event.shiftKey ? 24 : 10;
+  const direction = event.key === "ArrowRight" ? 1 : -1;
+  const current = side === "left" ? leftPaneWidth : rightPaneWidth;
+  applyPaneWidth(
+    side,
+    side === "left" ? current + direction * step : current - direction * step,
+  );
+  api?.savePreferences(
+    side === "left" ? { leftPaneWidth } : { rightPaneWidth },
+  );
+}
+
+function setTagPaneOpen(open: boolean, persist: boolean): void {
+  element("app").classList.toggle("tag-pane-closed", !open);
+  element("tag-pane-toggle").setAttribute("aria-pressed", String(open));
+  if (persist) api?.savePreferences({ tagPaneOpen: open });
+}
+
+function setInspectorOpen(open: boolean, persist: boolean): void {
+  element("app").classList.toggle("inspector-closed", !open);
+  element("inspector-toggle").setAttribute("aria-pressed", String(open));
+  if (persist) api?.savePreferences({ inspectorOpen: open });
+}
+
+function setDensity(nextDensity: InterfaceDensity, persist: boolean): void {
+  density = nextDensity === "compact" ? "compact" : "comfortable";
+  const isCompact = density === "compact";
+  element("app").classList.toggle("density-compact", isCompact);
+  element("density-toggle").setAttribute("aria-pressed", String(isCompact));
+  tagVirtualList.setRowHeight(isCompact ? 25 : 30);
+  itemVirtualList.setRowHeight(isCompact ? 28 : 34);
+  if (persist) api?.savePreferences({ density });
+}
 
 function configureItemColumns(): void {
   itemColumnWidths = completeItemColumnWidths(
     bootstrap?.preferences.itemColumnWidths,
   );
   for (const key of ITEM_COLUMN_KEYS) {
-    applyItemColumnWidth(key, itemColumnWidths[key]);
+    applyItemColumnWidth(key, itemColumnWidths[key], false);
     const resizer = document.querySelector<HTMLElement>(
       `[data-resize-column="${key}"]`,
     );
@@ -640,7 +1093,65 @@ function configureItemColumns(): void {
     resizer.setAttribute("aria-valuemin", String(limits.minimum));
     resizer.setAttribute("aria-valuemax", String(limits.maximum));
   }
+  updateDynamicColumnsGrid();
   syncItemHeaderScroll();
+}
+
+function updateDynamicColumnsGrid(): void {
+  visibleColumns = sanitizeVisibleItemColumns(visibleColumns);
+  const activeCols = ITEM_COLUMN_KEYS.filter((key) =>
+    visibleColumns.includes(key),
+  );
+  for (const key of ITEM_COLUMN_KEYS) {
+    const header = document.querySelector<HTMLElement>(
+      `.column-header[data-column="${key}"]`,
+    );
+    if (header) header.hidden = !activeCols.includes(key);
+  }
+  const templateParts = [
+    "52px",
+    ...activeCols.map((key) => `var(${ITEM_COLUMN_CSS_VARIABLES[key]})`),
+    "minmax(48px, 1fr)",
+  ];
+  const minWidth =
+    52 + activeCols.reduce((sum, key) => sum + itemColumnWidths[key], 0) + 54;
+  const app = element("app");
+  app.style.setProperty("--items-grid-template", templateParts.join(" "));
+  app.style.setProperty("--item-table-min-width", `${minWidth}px`);
+  itemVirtualList?.refresh();
+}
+
+function openColumnsMenu(anchor: HTMLElement): void {
+  closeAllContextMenus();
+  const menu = element("columns-menu");
+  const fragment = document.createDocumentFragment();
+  for (const key of ITEM_COLUMN_KEYS) {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = visibleColumns.includes(key);
+    checkbox.disabled = key === "title";
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        if (!visibleColumns.includes(key)) visibleColumns.push(key);
+      } else {
+        visibleColumns = visibleColumns.filter((col) => col !== key);
+      }
+      updateDynamicColumnsGrid();
+      api?.savePreferences({ visibleColumns: [...visibleColumns] });
+    });
+    const span = document.createElement("span");
+    span.textContent = key === "citekey" ? "CiteKey" : translate(key);
+    label.append(checkbox, span);
+    fragment.appendChild(label);
+  }
+  menu.replaceChildren(fragment);
+  positionContextMenu(
+    menu,
+    anchor.getBoundingClientRect().right,
+    anchor.getBoundingClientRect().bottom + 4,
+    true,
+  );
 }
 
 function itemColumnKeyFromElement(target: HTMLElement): ItemColumnKey | null {
@@ -648,7 +1159,11 @@ function itemColumnKeyFromElement(target: HTMLElement): ItemColumnKey | null {
   return key && ITEM_COLUMN_KEYS.includes(key) ? key : null;
 }
 
-function applyItemColumnWidth(key: ItemColumnKey, width: number): void {
+function applyItemColumnWidth(
+  key: ItemColumnKey,
+  width: number,
+  refreshGrid = true,
+): void {
   const clamped = clampItemColumnWidth(key, width);
   itemColumnWidths[key] = clamped;
   element("app").style.setProperty(
@@ -658,6 +1173,7 @@ function applyItemColumnWidth(key: ItemColumnKey, width: number): void {
   document
     .querySelector<HTMLElement>(`[data-resize-column="${key}"]`)
     ?.setAttribute("aria-valuenow", String(clamped));
+  if (refreshGrid) updateDynamicColumnsGrid();
 }
 
 function persistItemColumnWidths(): void {
@@ -737,12 +1253,14 @@ function syncItemHeaderScroll(): void {
   header.style.transform = `translateX(${-scrollLeft}px)`;
 }
 
+/* ==========================================================================
+ * Bootstrap Controls & Populators
+ * ========================================================================== */
+
 function configureZettlrCitationFormat(): void {
   if (!bootstrap) return;
   const checkbox = element<HTMLInputElement>("zettlr-citation-format");
   const status = element("zettlr-format-status");
-  // Keep upgrades from an already-running older backend usable until Zotero
-  // finishes reloading the add-on and both sides share the same API version.
   const format = bootstrap.zettlrCitationFormat || {
     available: false,
     citeStyle: "regular" as const,
@@ -767,10 +1285,7 @@ function populateLibraries(): void {
   const select = element<HTMLSelectElement>("library-select");
   const fragment = document.createDocumentFragment();
   for (const library of bootstrap.libraries) {
-    const option = document.createElement("option");
-    option.value = String(library.id);
-    option.textContent = library.name;
-    fragment.appendChild(option);
+    fragment.appendChild(createOption(String(library.id), library.name));
   }
   select.replaceChildren(fragment);
   select.value = String(bootstrap.preferences.selectedLibraryID);
@@ -781,14 +1296,62 @@ function populateCitationStyles(): void {
   const select = element<HTMLSelectElement>("citation-style");
   const fragment = document.createDocumentFragment();
   for (const style of bootstrap.citationStyles) {
-    const option = document.createElement("option");
-    option.value = style.id;
-    option.textContent = style.title;
-    fragment.appendChild(option);
+    fragment.appendChild(createOption(style.id, style.title));
   }
   select.replaceChildren(fragment);
   select.value = bootstrap.defaultCitationStyleID;
 }
+
+function populateScopeCollectionSelect(): void {
+  const select = element<HTMLSelectElement>("scope-collection-select");
+  const currentValue = activeSavedSearchID
+    ? `search:${activeSavedSearchID}`
+    : activeCollectionID
+      ? `col:${activeCollectionID}`
+      : unfiledOnly
+        ? "unfiled"
+        : "";
+
+  const fragment = document.createDocumentFragment();
+  fragment.appendChild(createOption("", translate("allItemsScope")));
+  fragment.appendChild(createOption("unfiled", translate("unfiledItemsScope")));
+
+  if (collections.length) {
+    const group = document.createElement("optgroup");
+    group.label = translate("collectionsGroup");
+    for (const col of collections) {
+      const prefix = col.depth > 0 ? `${"  ".repeat(col.depth)}↳ ` : "";
+      group.appendChild(createOption(`col:${col.id}`, `${prefix}${col.name}`));
+    }
+    fragment.appendChild(group);
+  }
+
+  if (savedSearches.length) {
+    const group = document.createElement("optgroup");
+    group.label = translate("savedSearchesGroup");
+    for (const search of savedSearches) {
+      group.appendChild(
+        createOption(`search:${search.id}`, `🔍 ${search.name}`),
+      );
+    }
+    fragment.appendChild(group);
+  }
+
+  select.replaceChildren(fragment);
+  if (
+    Array.from(
+      select.querySelectorAll("option") as unknown as HTMLOptionElement[],
+    ).some((opt) => opt.value === currentValue)
+  ) {
+    select.value = currentValue;
+  } else {
+    select.value = "";
+  }
+}
+
+/* ==========================================================================
+ * Event Binding
+ * ========================================================================== */
 
 function bindEvents(): void {
   element<HTMLSelectElement>("library-select").addEventListener(
@@ -800,6 +1363,35 @@ function bindEvents(): void {
       await loadLibrary(libraryID);
     },
   );
+
+  element<HTMLSelectElement>("scope-collection-select").addEventListener(
+    "change",
+    (event) => {
+      markSavedFilterDirty();
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      activeCollectionID = null;
+      unfiledOnly = false;
+      activeSavedSearchID = null;
+      if (value === "unfiled") {
+        unfiledOnly = true;
+      } else if (value.startsWith("col:")) {
+        activeCollectionID = Number(value.slice(4)) || null;
+      } else if (value.startsWith("search:")) {
+        activeSavedSearchID = Number(value.slice(7)) || null;
+      }
+      void executeUnifiedQuery();
+    },
+  );
+
+  element("tag-pane-toggle").addEventListener("click", () => {
+    setTagPaneOpen(element("app").classList.contains("tag-pane-closed"), true);
+  });
+  element("density-toggle").addEventListener("click", () => {
+    setDensity(density === "compact" ? "comfortable" : "compact", true);
+  });
+  element("shortcuts-button").addEventListener("click", openShortcutsDialog);
+  element("shortcuts-close").addEventListener("click", closeShortcutsDialog);
+  element("shortcuts-ok").addEventListener("click", closeShortcutsDialog);
 
   element("refresh-button").addEventListener(
     "click",
@@ -815,6 +1407,32 @@ function bindEvents(): void {
     setInspectorOpen(false, true),
   );
 
+  // Pane splitters
+  const leftSplitter = element("left-splitter");
+  leftSplitter.addEventListener("pointerdown", (e) =>
+    startPaneResize("left", e as PointerEvent),
+  );
+  leftSplitter.addEventListener("dblclick", () => {
+    applyPaneWidth("left", DEFAULT_LEFT_PANE_WIDTH);
+    api?.savePreferences({ leftPaneWidth });
+  });
+  leftSplitter.addEventListener("keydown", (e) =>
+    handlePaneSplitterKeyboard("left", e as KeyboardEvent),
+  );
+
+  const rightSplitter = element("right-splitter");
+  rightSplitter.addEventListener("pointerdown", (e) =>
+    startPaneResize("right", e as PointerEvent),
+  );
+  rightSplitter.addEventListener("dblclick", () => {
+    applyPaneWidth("right", DEFAULT_RIGHT_PANE_WIDTH);
+    api?.savePreferences({ rightPaneWidth });
+  });
+  rightSplitter.addEventListener("keydown", (e) =>
+    handlePaneSplitterKeyboard("right", e as KeyboardEvent),
+  );
+
+  // Tag Pane Controls
   const tagSearch = element<HTMLInputElement>("tag-search");
   tagSearch.addEventListener("input", filterTagList);
   element("clear-tag-search").addEventListener("click", () => {
@@ -822,6 +1440,25 @@ function bindEvents(): void {
     tagSearch.focus();
     filterTagList();
   });
+
+  element("tag-kind-filters").addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest(
+      "button[data-tag-kind]",
+    ) as HTMLButtonElement | null;
+    if (!button) return;
+    setTagKindFilter((button.dataset.tagKind as TagKindFilter) || "all");
+  });
+
+  element<HTMLSelectElement>("tag-sort-select").addEventListener(
+    "change",
+    (event) => {
+      tagSortMode =
+        ((event.currentTarget as HTMLSelectElement).value as TagSortMode) ||
+        "name";
+      updateTagRows();
+    },
+  );
+
   element<HTMLInputElement>("hide-automatic-tags").addEventListener(
     "change",
     (event) => {
@@ -831,6 +1468,38 @@ function bindEvents(): void {
     },
   );
   element("tag-list").addEventListener("keydown", handleTagListKeyboard);
+  element("tag-list").addEventListener("dragover", (e) =>
+    autoScrollVirtualContainer(element("tag-list"), e as DragEvent),
+  );
+
+  element("tag-curation-button").addEventListener("click", (event) => {
+    const button = event.currentTarget as HTMLElement;
+    openTagCurationMenu(button);
+  });
+  element("tag-curation-menu").addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest(
+      "button[data-curation]",
+    ) as HTMLButtonElement | null;
+    if (!button) return;
+    closeAllContextMenus();
+    const action = button.dataset.curation;
+    if (action === "show-single") {
+      setTagKindFilter("single");
+    } else if (action === "show-colored") {
+      setTagKindFilter("colored");
+    } else if (action === "remove-all-auto" && overview) {
+      const autoEntries = overview.tags.filter(
+        (t) => t.automaticCount > 0,
+      ).length;
+      openTagActionDialog("removeAllAutomatic", {
+        name: "",
+        kind: "automatic",
+        count: autoEntries,
+        manualCount: 0,
+        automaticCount: autoEntries,
+      });
+    }
+  });
 
   element("tag-actions-button").addEventListener("click", (event) => {
     const source = selectedTagSummary();
@@ -843,24 +1512,51 @@ function bindEvents(): void {
     const button = (event.target as HTMLElement).closest(
       "button[data-tag-action]",
     ) as HTMLButtonElement | null;
-    if (!button || !tagActionSource) return;
-    openTagActionDialog(
-      button.dataset.tagAction as TagActionMode,
-      tagActionSource,
-    );
-  });
-  document.addEventListener("pointerdown", (event) => {
-    const target = event.target as Node;
-    const menu = element("tag-actions-menu");
-    if (
-      !menu.hidden &&
-      !menu.contains(target) &&
-      !element("tag-actions-button").contains(target)
+    if (!button || button.disabled || !tagActionSource) return;
+    const source = tagActionSource;
+    const action = button.dataset.tagAction;
+    closeAllContextMenus();
+    if (action === "filter-and") {
+      toggleIncludeTag(source.name);
+    } else if (action === "filter-not") {
+      toggleExcludeTag(source.name);
+    } else if (action === "color") {
+      openTagColorDialog(source);
+    } else if (action === "remove-color") {
+      void removeColorFromTag(source.name);
+    } else if (action === "convert-manual") {
+      openTagActionDialog("convertToManual", source);
+    } else if (
+      action === "rename" ||
+      action === "merge" ||
+      action === "delete"
     ) {
-      closeTagActionsMenu();
+      openTagActionDialog(action, source);
     }
   });
 
+  // Global outside-click dismissal for custom context menus
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target as Node;
+    for (const [menuId, triggerId] of [
+      ["tag-actions-menu", "tag-actions-button"],
+      ["tag-curation-menu", "tag-curation-button"],
+      ["columns-menu", "columns-menu-button"],
+      ["item-context-menu", ""],
+    ] as const) {
+      const menu = element(menuId);
+      if (
+        !menu.hidden &&
+        !menu.contains(target) &&
+        (!triggerId || !element(triggerId).contains(target))
+      ) {
+        menu.hidden = true;
+        if (menuId === "tag-actions-menu") tagActionSource = null;
+      }
+    }
+  });
+
+  // Quick Search & Mode
   const itemSearch = element<HTMLInputElement>("item-search");
   itemSearch.addEventListener("input", handleItemSearchInput);
   element("clear-item-search").addEventListener("click", () => {
@@ -868,7 +1564,100 @@ function bindEvents(): void {
     itemSearch.focus();
     handleItemSearchInput();
   });
+  element<HTMLSelectElement>("quicksearch-mode").addEventListener(
+    "change",
+    (event) => {
+      markSavedFilterDirty();
+      quickSearchMode =
+        ((event.currentTarget as HTMLSelectElement).value as QuickSearchMode) ||
+        "fields";
+      if (itemSearch.value.trim()) {
+        void executeUnifiedQuery();
+      }
+    },
+  );
 
+  // Advanced Search Builder
+  element("advanced-search-toggle").addEventListener(
+    "click",
+    toggleAdvancedSearchPanel,
+  );
+  element<HTMLSelectElement>("advanced-join-mode").addEventListener(
+    "change",
+    (event) => {
+      markSavedFilterDirty();
+      joinMode =
+        ((event.currentTarget as HTMLSelectElement).value as SearchJoinMode) ||
+        "all";
+    },
+  );
+  element<HTMLInputElement>("include-subcollections").addEventListener(
+    "change",
+    (event) => {
+      markSavedFilterDirty();
+      includeSubcollections = (event.currentTarget as HTMLInputElement).checked;
+      if (
+        activeCollectionID ||
+        advancedConditions.some((c) => c.condition === "collection")
+      ) {
+        void executeUnifiedQuery();
+      }
+    },
+  );
+  element("advanced-add-row").addEventListener("click", () => {
+    advancedConditions.push({
+      condition: "title",
+      operator: "contains",
+      value: "",
+    });
+    renderAdvancedConditionRows();
+  });
+  element("advanced-clear").addEventListener("click", () => {
+    markSavedFilterDirty();
+    advancedConditions = [
+      { condition: "title", operator: "contains", value: "" },
+    ];
+    renderAdvancedConditionRows();
+    updateAdvancedConditionBadge();
+    void executeUnifiedQuery();
+  });
+  element("advanced-run").addEventListener("click", () => {
+    markSavedFilterDirty();
+    updateAdvancedConditionBadge();
+    void executeUnifiedQuery();
+  });
+  element("advanced-save-view").addEventListener("click", () =>
+    openSaveQueryDialog("view"),
+  );
+  element("advanced-save-zotero").addEventListener("click", () =>
+    openSaveQueryDialog("zoteroSearch"),
+  );
+
+  // Active Filter Strip
+  element("clear-all-active-filters").addEventListener(
+    "click",
+    () => void clearAllActiveFilters(),
+  );
+
+  // Columns Menu & Pagination
+  element("columns-menu-button").addEventListener("click", (event) => {
+    openColumnsMenu(event.currentTarget as HTMLElement);
+  });
+  element("load-more-items").addEventListener("click", () => {
+    void executeUnifiedQuery({
+      append: true,
+      preserveItemIDs: getSelectedItemIDs(),
+    });
+  });
+  element("load-all-items").addEventListener("click", () => {
+    void executeUnifiedQuery({
+      append: true,
+      loadAll: true,
+      preserveItemIDs: getSelectedItemIDs(),
+    });
+  });
+
+  // Facet & Date Filters Bar
   element("filters-toggle").addEventListener("click", toggleFilters);
   for (const id of [
     "author-filter",
@@ -885,13 +1674,15 @@ function bindEvents(): void {
     element(id).addEventListener("input", () => {
       markSavedFilterDirty();
       applyItemFilters();
+      renderActiveFilterPills();
     });
     element(id).addEventListener("change", () => {
       markSavedFilterDirty();
       applyItemFilters();
+      renderActiveFilterPills();
     });
   }
-  element("clear-filters").addEventListener("click", clearFilters);
+  element("clear-filters").addEventListener("click", clearClientFilters);
   element<HTMLSelectElement>("saved-filter-select").addEventListener(
     "change",
     (event) => {
@@ -900,9 +1691,12 @@ function bindEvents(): void {
       if (presetID) void applySavedFilter(presetID);
     },
   );
-  element("saved-filter-save").addEventListener("click", saveCurrentFilter);
+  element("saved-filter-save").addEventListener("click", () =>
+    openSaveQueryDialog("view"),
+  );
   element("saved-filter-delete").addEventListener("click", deleteSavedFilter);
 
+  // Item Table Sorting, Resizing & Selection
   document
     .querySelectorAll<HTMLButtonElement>("[data-sort]")
     .forEach((button: HTMLButtonElement) => {
@@ -913,6 +1707,9 @@ function bindEvents(): void {
   const itemsList = element("items-list");
   itemsList.addEventListener("keydown", handleItemListKeyboard);
   itemsList.addEventListener("scroll", syncItemHeaderScroll);
+  itemsList.addEventListener("dragover", (e) =>
+    autoScrollVirtualContainer(itemsList, e as DragEvent),
+  );
   element<HTMLInputElement>("select-visible-items").addEventListener(
     "change",
     (event) => {
@@ -929,6 +1726,55 @@ function bindEvents(): void {
       resizer.addEventListener("keydown", handleItemColumnResizeKeyboard);
     });
 
+  // Item Context Menu
+  element("item-context-menu").addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest(
+      "button[data-item-action]",
+    ) as HTMLButtonElement | null;
+    if (!button) return;
+    const action = button.dataset.itemAction;
+    closeAllContextMenus();
+    if (action === "open-file") void openSelectedAttachment();
+    else if (action === "show-zotero" && selectedItemID)
+      void api?.selectInMainWindow(selectedItemID);
+    else if (action === "copy-citekey") void copySelected("citekey");
+    else if (action === "copy-citation") void copySelected("citation");
+    else if (action === "copy-bibliography") void copySelected("bibliography");
+  });
+
+  // Inspector Drop Target (drop tag onto inspector to assign to selected items)
+  const inspectorPane = element("inspector-pane");
+  inspectorPane.addEventListener("dragover", (rawEvent) => {
+    const event = rawEvent as DragEvent;
+    if (
+      !event.dataTransfer ||
+      !hasTagNavigatorTagDrag(event.dataTransfer.types) ||
+      !selectedItemIDs.size ||
+      !isCurrentLibraryEditable()
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    inspectorPane.classList.add("drop-target");
+  });
+  inspectorPane.addEventListener("dragleave", (rawEvent) => {
+    const event = rawEvent as DragEvent;
+    if (!inspectorPane.contains(event.relatedTarget as Node | null)) {
+      inspectorPane.classList.remove("drop-target");
+    }
+  });
+  inspectorPane.addEventListener("drop", (rawEvent) => {
+    const event = rawEvent as DragEvent;
+    inspectorPane.classList.remove("drop-target");
+    const tagName = event.dataTransfer?.getData(TAGNAVIGATOR_TAG_DRAG_TYPE);
+    if (!tagName || !selectedItemIDs.size) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void addTag(tagName);
+  });
+
+  // Inspector Actions
   element("show-in-zotero").addEventListener("click", () => {
     if (selectedItemID) void api?.selectInMainWindow(selectedItemID);
   });
@@ -972,6 +1818,7 @@ function bindEvents(): void {
   tagInput.addEventListener("input", updateTagAutocomplete);
   tagInput.addEventListener("keydown", handleAutocompleteKeyboard);
 
+  // Tag Action Dialog
   element<HTMLFormElement>("tag-action-form").addEventListener(
     "submit",
     (event) => {
@@ -995,6 +1842,56 @@ function bindEvents(): void {
   tagActionTarget.addEventListener("input", updateTagActionAutocomplete);
   tagActionTarget.addEventListener("keydown", handleTagActionAutocompleteKey);
 
+  // Tag Color Dialog
+  element<HTMLFormElement>("tag-color-form").addEventListener(
+    "submit",
+    (event) => {
+      event.preventDefault();
+      void submitTagColorDialog();
+    },
+  );
+  element("tag-color-close").addEventListener("click", closeTagColorDialog);
+  element("tag-color-cancel").addEventListener("click", closeTagColorDialog);
+  element("tag-color-remove").addEventListener("click", () => {
+    if (colorDialogSource) {
+      const name = colorDialogSource.name;
+      closeTagColorDialog();
+      void removeColorFromTag(name);
+    }
+  });
+  element<HTMLInputElement>("tag-color-picker").addEventListener(
+    "input",
+    (event) => {
+      const val = (event.currentTarget as HTMLInputElement).value;
+      element<HTMLInputElement>("tag-color-hex").value = val;
+      highlightSelectedPaletteSwatch(val);
+    },
+  );
+  element<HTMLInputElement>("tag-color-hex").addEventListener(
+    "input",
+    (event) => {
+      const normalized = normalizeHexColor(
+        (event.currentTarget as HTMLInputElement).value,
+      );
+      if (normalized) {
+        element<HTMLInputElement>("tag-color-picker").value = normalized;
+        highlightSelectedPaletteSwatch(normalized);
+      }
+    },
+  );
+
+  // Save Query / Saved View Dialog
+  element<HTMLFormElement>("save-query-form").addEventListener(
+    "submit",
+    (event) => {
+      event.preventDefault();
+      void submitSaveQueryDialog();
+    },
+  );
+  element("save-query-close").addEventListener("click", closeSaveQueryDialog);
+  element("save-query-cancel").addEventListener("click", closeSaveQueryDialog);
+
+  // Error Banner
   element("error-retry").addEventListener("click", () => {
     hideError();
     if (retryAction) void retryAction();
@@ -1005,6 +1902,10 @@ function bindEvents(): void {
   window.addEventListener("keydown", handleGlobalKeyboard);
 }
 
+/* ==========================================================================
+ * Library Loading & Unified Query Engine
+ * ========================================================================== */
+
 async function loadLibrary(libraryID: number): Promise<void> {
   if (!api || !bootstrap) return;
   const token = ++tagLoadToken;
@@ -1012,31 +1913,56 @@ async function loadLibrary(libraryID: number): Promise<void> {
   ++detailLoadToken;
   setLoading(true, "loadingLibrary");
   hideError();
+
   currentLibraryID = libraryID;
   overview = null;
-  currentScope = null;
+  collections = [];
+  savedSearches = [];
+  includeTags = [];
+  excludeTags = [];
+  untaggedOnly = false;
+  activeCollectionID = null;
+  unfiledOnly = false;
+  activeSavedSearchID = null;
+  advancedConditions = [];
+  facetTagCounts = {};
   selectedItemID = null;
   selectedItemIDs.clear();
   selectionAnchorID = null;
   selectedDetails = null;
   allItems = [];
   visibleItems = [];
+  sortKey = "dateModified";
+  sortDirection = "descending";
+  resetClientFilters();
   resetInspector();
-  resetItemView();
 
   try {
-    const loaded = await api.getTagOverview(libraryID);
+    const [loadedOverview, loadedCollections, loadedSearches] =
+      await Promise.all([
+        api.getTagOverview(libraryID),
+        api.getCollections(libraryID),
+        api.getSavedSearches(libraryID),
+      ]);
     if (token !== tagLoadToken) return;
-    overview = loaded;
+    overview = loadedOverview;
+    collections = loadedCollections;
+    savedSearches = loadedSearches;
+
     element<HTMLSelectElement>("library-select").value = String(libraryID);
     api.savePreferences({ selectedLibraryID: libraryID });
-    updateTagRows();
+    populateScopeCollectionSelect();
     populateSavedFilterSelect();
-    await enterLibrarySearch();
+    renderAdvancedConditionRows();
+    updateAdvancedConditionBadge();
+    updateTagRows();
+
     const library = bootstrap.libraries.find((entry) => entry.id === libraryID);
     element("library-status").textContent = library
       ? translate("showingLibrary", { name: library.name })
       : "";
+
+    await executeUnifiedQuery();
   } catch (error) {
     if (token === tagLoadToken) {
       showError(error, () => loadLibrary(libraryID));
@@ -1046,12 +1972,194 @@ async function loadLibrary(libraryID: number): Promise<void> {
   }
 }
 
+function activeAdvancedConditions(): AdvancedSearchCondition[] {
+  return advancedConditions.filter(
+    (row) =>
+      row.condition &&
+      row.operator &&
+      (UNARY_OPERATORS.has(row.operator) || Boolean(row.value.trim())),
+  );
+}
+
+function isFilteredQueryActive(): boolean {
+  return Boolean(
+    includeTags.length ||
+    excludeTags.length ||
+    untaggedOnly ||
+    activeCollectionID !== null ||
+    unfiledOnly ||
+    activeSavedSearchID !== null ||
+    element<HTMLInputElement>("item-search").value.trim() ||
+    activeAdvancedConditions().length,
+  );
+}
+
+function buildUnifiedQuery(): UnifiedItemQuery {
+  return {
+    includeTags: [...includeTags],
+    excludeTags: [...excludeTags],
+    untaggedOnly,
+    collectionID: activeCollectionID,
+    unfiledOnly,
+    savedSearchID: activeSavedSearchID,
+    includeSubcollections,
+    quickSearchQuery: element<HTMLInputElement>("item-search").value.trim(),
+    quickSearchMode,
+    joinMode,
+    advancedConditions: activeAdvancedConditions(),
+  };
+}
+
+function currentQueryHeading(): string {
+  if (activeSavedSearchID !== null) {
+    const found = savedSearches.find((s) => s.id === activeSavedSearchID);
+    if (found) return found.name;
+  }
+  if (untaggedOnly) return translate("untagged");
+  if (includeTags.length === 1 && !excludeTags.length && !activeCollectionID) {
+    return includeTags[0];
+  }
+  if (includeTags.length || excludeTags.length) {
+    const parts = [
+      ...includeTags.map((t) => `+${t}`),
+      ...excludeTags.map((t) => `−${t}`),
+    ];
+    return parts.join(" ");
+  }
+  if (activeCollectionID !== null) {
+    const col = collections.find((c) => c.id === activeCollectionID);
+    if (col) return col.name;
+  }
+  if (unfiledOnly) return translate("unfiledItemsScope");
+  if (
+    element<HTMLInputElement>("item-search").value.trim() ||
+    activeAdvancedConditions().length
+  ) {
+    return translate("allLibrary");
+  }
+  return translate("recentItems");
+}
+
+async function executeUnifiedQuery(
+  options: {
+    append?: boolean;
+    loadAll?: boolean;
+    preserveItemIDs?: number[];
+  } = {},
+): Promise<void> {
+  if (!api || !currentLibraryID) return;
+  const token = ++itemLoadToken;
+  const append = Boolean(options.append);
+  const preserveIDs = options.preserveItemIDs || [];
+
+  if (!append) {
+    selectedItemIDs = new Set(preserveIDs);
+    selectedItemID = preserveIDs[0] || null;
+    if (!preserveIDs.length) resetInspector();
+    element("results-title").textContent = currentQueryHeading();
+    element("results-count").textContent = "…";
+    element("items-status").textContent = translate(
+      isFilteredQueryActive() ? "searchingLibrary" : "loadingItems",
+    );
+    element("pagination-actions").hidden = true;
+    showItemsEmpty("loadingItems", "");
+  }
+
+  element<HTMLInputElement>("item-search").disabled = false;
+  updateTagActionButton();
+  renderColoredTagsBar();
+  renderActiveFilterPills();
+  hideError();
+
+  try {
+    const query = buildUnifiedQuery();
+    query.offset = append ? allItems.length : 0;
+    query.limit = options.loadAll ? 0 : pageSize;
+
+    const result = await api.queryItems(currentLibraryID, query);
+    if (token !== itemLoadToken) return;
+
+    if (append) {
+      const seen = new Set(allItems.map((item) => item.id));
+      for (const item of result.items) {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          allItems.push(item);
+        }
+      }
+    } else {
+      allItems = result.items;
+    }
+
+    queryTotal = result.total;
+    queryHasMore = result.hasMore;
+    facetTagCounts = result.facetTagCounts || {};
+
+    element("results-title").textContent = currentQueryHeading();
+    updatePaginationControls();
+    tagVirtualList.refresh();
+    populateItemFilterOptions();
+    setResultFilterControlsEnabled(true);
+    applyItemFilters(append);
+
+    if (preserveIDs.length) {
+      await restoreItemSelection(preserveIDs);
+    }
+  } catch (error) {
+    if (token !== itemLoadToken) return;
+    showError(error, () => executeUnifiedQuery(options));
+    showItemsEmpty("noItemsTitle", "noItemsBody");
+  }
+}
+
+function updatePaginationControls(): void {
+  const container = element("pagination-actions");
+  container.hidden = !queryHasMore;
+  if (!queryHasMore) return;
+  const remaining = Math.max(0, queryTotal - allItems.length);
+  const nextStep = Math.min(pageSize, remaining);
+  element("load-more-items").textContent = translate("loadMoreItemsCount", {
+    count: nextStep.toLocaleString(language),
+  });
+  element("load-all-items").textContent = translate("loadAllItems", {
+    total: queryTotal.toLocaleString(language),
+  });
+}
+
+/* ==========================================================================
+ * Left Tag Pane: Colored Tags, Filtering, Sorting & Drag/Drop
+ * ========================================================================== */
+
+function setTagKindFilter(kind: TagKindFilter): void {
+  tagKindFilter = kind;
+  element("tag-kind-filters")
+    .querySelectorAll<HTMLButtonElement>("button[data-tag-kind]")
+    .forEach((btn: HTMLButtonElement) => {
+      btn.classList.toggle("active", btn.dataset.tagKind === kind);
+    });
+  filterTagList();
+}
+
 function updateTagRows(): void {
   if (!overview) {
     currentTagRows = [];
+    renderColoredTagsBar();
     filterTagList();
     return;
   }
+
+  const sortedTags = overview.tags.slice().sort((a, b) => {
+    if (tagSortMode === "count") {
+      return b.count - a.count || a.name.localeCompare(b.name, language);
+    }
+    if (tagSortMode === "color") {
+      const posA = a.colorPosition ?? 999;
+      const posB = b.colorPosition ?? 999;
+      if (posA !== posB) return posA - posB;
+      return a.name.localeCompare(b.name, language);
+    }
+    return a.name.localeCompare(b.name, language);
+  });
 
   currentTagRows = [
     {
@@ -1061,17 +2169,79 @@ function updateTagRows(): void {
       kind: "untagged",
       scope: { kind: "untagged" },
     },
-    ...overview.tags.map((tag) => ({
+    ...sortedTags.map((tag) => ({
       key: `tag:${tag.name}`,
       label: tag.name,
       count: tag.count,
       kind: tag.kind,
+      color: tag.color,
+      colorPosition: tag.colorPosition,
       scope: { kind: "tag" as const, tagName: tag.name },
     })),
   ];
+
   element("tag-total").textContent = String(overview.tags.length);
+  renderColoredTagsBar();
   filterTagList();
   updateTagActionButton();
+}
+
+function renderColoredTagsBar(): void {
+  const bar = element("colored-tags-bar");
+  const slots = overview?.coloredTags || [];
+  if (!slots.length) {
+    bar.hidden = true;
+    bar.replaceChildren();
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const slot of slots) {
+    fragment.appendChild(createColoredSlotPill(slot));
+  }
+  bar.replaceChildren(fragment);
+  bar.hidden = false;
+}
+
+function createColoredSlotPill(slot: ColoredTagSlot): HTMLButtonElement {
+  const pill = document.createElement("button");
+  pill.type = "button";
+  pill.className = "colored-slot-pill";
+  pill.style.setProperty("--tag-bg", slot.color);
+  pill.style.setProperty("--tag-fg", getContrastingTextColor(slot.color));
+  if (includeTags.includes(slot.name)) pill.classList.add("active-and");
+  if (excludeTags.includes(slot.name)) pill.classList.add("active-not");
+  pill.title = `[${slot.position}] ${slot.name}\n${translate("booleanTagHint")}`;
+
+  const num = document.createElement("span");
+  num.className = "colored-slot-num";
+  num.textContent = String(slot.position);
+  const name = document.createElement("span");
+  name.className = "colored-slot-name";
+  name.textContent = slot.name;
+  pill.append(num, name);
+
+  pill.addEventListener("click", (event) => {
+    handleTagFilterClick(slot.name, event as MouseEvent);
+  });
+  pill.addEventListener("contextmenu", (event) => {
+    const source = overview?.tags.find((t) => t.name === slot.name);
+    if (!source) return;
+    event.preventDefault();
+    const mouseEvent = event as MouseEvent;
+    openTagActionsMenu(source, mouseEvent.clientX, mouseEvent.clientY);
+  });
+
+  if (isCurrentLibraryEditable()) {
+    pill.draggable = true;
+    pill.addEventListener("dragstart", (rawEvent) => {
+      startTagDrag(rawEvent as DragEvent, slot.name);
+    });
+    pill.addEventListener("dragend", cleanupDragGhost);
+    bindItemDropOntoTagElement(pill, slot.name);
+  }
+
+  return pill;
 }
 
 function filterTagList(): void {
@@ -1083,14 +2253,28 @@ function filterTagList(): void {
   element("clear-tag-search").hidden = !queryInput.value;
 
   visibleTagRows = currentTagRows.filter((entry) => {
-    if (hideAutomatic && entry.kind === "automatic") return false;
+    if (entry.kind === "untagged") {
+      if (tagKindFilter !== "all") return false;
+      return !query || normalize(entry.label).includes(query);
+    }
+    if (
+      hideAutomatic &&
+      entry.kind === "automatic" &&
+      tagKindFilter !== "automatic"
+    ) {
+      return false;
+    }
+    if (tagKindFilter === "manual" && entry.kind === "automatic") return false;
+    if (tagKindFilter === "automatic" && entry.kind === "manual") return false;
+    if (tagKindFilter === "colored" && !entry.color) return false;
+    if (tagKindFilter === "single" && entry.count !== 1) return false;
     return !query || normalize(entry.label).includes(query);
   });
+
   tagVirtualList.setItems(visibleTagRows);
-  const total = currentTagRows.length;
   element("tag-list-status").textContent = translate("tagStatus", {
     visible: visibleTagRows.length,
-    total,
+    total: currentTagRows.length,
   });
 }
 
@@ -1098,83 +2282,193 @@ function renderTagRow(entry: TagListEntry): HTMLElement {
   const row = document.createElement("div");
   row.className = "tag-row";
   row.setAttribute("role", "option");
-  row.setAttribute(
-    "aria-selected",
-    String(scopesEqual(entry.scope, currentScope)),
-  );
-  row.title = entry.label;
+
+  const isUntagged = entry.scope.kind === "untagged";
+  const tagName = entry.scope.kind === "tag" ? entry.scope.tagName : "";
+  const isIncluded = isUntagged ? untaggedOnly : includeTags.includes(tagName);
+  const isExcluded = !isUntagged && excludeTags.includes(tagName);
+
+  row.setAttribute("aria-selected", String(isIncluded));
+  if (isExcluded) row.classList.add("excluded-tag");
+
+  const filteredActive = isFilteredQueryActive();
+  const facetCount =
+    !isUntagged && filteredActive
+      ? (facetTagCounts[tagName] ?? 0)
+      : entry.count;
+  if (!isUntagged && filteredActive && facetCount === 0 && !isIncluded) {
+    row.classList.add("zero-facet");
+  }
 
   const dot = document.createElement("span");
-  dot.className = `tag-dot ${entry.kind}`;
+  if (entry.color) {
+    dot.className = "tag-dot colored-swatch";
+    dot.style.backgroundColor = entry.color;
+    dot.style.color = getContrastingTextColor(entry.color);
+    dot.textContent = entry.colorPosition ? String(entry.colorPosition) : "";
+  } else {
+    dot.className = `tag-dot ${entry.kind}`;
+  }
+
   const name = document.createElement("span");
   name.className = "tag-name";
   name.textContent = entry.label;
+
+  const meta = document.createElement("span");
+  meta.className = "tag-meta-group";
+  if (!isUntagged && (isIncluded || isExcluded)) {
+    const badge = document.createElement("span");
+    badge.className = "tag-bool-badge";
+    badge.textContent = isExcluded ? "−" : "+";
+    meta.appendChild(badge);
+  }
   const count = document.createElement("span");
   count.className = "tag-count";
-  count.textContent = String(entry.count);
-  row.append(dot, name, count);
-  row.addEventListener("click", () => {
-    if (scopesEqual(entry.scope, currentScope)) {
-      void enterLibrarySearch();
+  count.textContent =
+    !isUntagged && filteredActive
+      ? `${facetCount}/${entry.count}`
+      : String(entry.count);
+  meta.appendChild(count);
+
+  row.append(dot, name, meta);
+  row.title = isUntagged
+    ? entry.label
+    : `${entry.label}\n${isIncluded ? translate("deselectTag") : translate("booleanTagHint")}`;
+
+  row.addEventListener("click", (event) => {
+    if (isUntagged) {
+      markSavedFilterDirty();
+      untaggedOnly = !untaggedOnly;
+      if (untaggedOnly) {
+        includeTags = [];
+        excludeTags = [];
+      }
+      void executeUnifiedQuery();
     } else {
-      void selectScope(entry.scope);
+      handleTagFilterClick(tagName, event as MouseEvent);
     }
   });
+
   row.addEventListener("contextmenu", (event) => {
-    if (entry.scope.kind !== "tag" || !isCurrentLibraryEditable()) return;
-    const tagName = entry.scope.tagName;
+    if (entry.scope.kind !== "tag") return;
     const source = overview?.tags.find((tag) => tag.name === tagName);
     if (!source) return;
     event.preventDefault();
     const mouseEvent = event as MouseEvent;
     openTagActionsMenu(source, mouseEvent.clientX, mouseEvent.clientY);
   });
-  if (scopesEqual(entry.scope, currentScope)) {
-    row.title = `${entry.label}\n${translate("deselectTag")}`;
-  }
+
   if (entry.scope.kind === "tag" && isCurrentLibraryEditable()) {
-    const dropTagName = entry.scope.tagName;
     row.title += `\n${translate("dropTagHint")}`;
-    row.addEventListener("dragover", (rawEvent) => {
-      const event = rawEvent as DragEvent;
-      if (!event.dataTransfer || !hasZoteroItemDrag(event.dataTransfer.types))
-        return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "copy";
-      row.classList.add("drop-target");
+    row.draggable = true;
+    row.addEventListener("dragstart", (rawEvent) => {
+      startTagDrag(rawEvent as DragEvent, tagName);
     });
-    row.addEventListener("dragleave", (rawEvent) => {
-      const event = rawEvent as DragEvent;
-      if (!row.contains(event.relatedTarget as Node | null))
-        row.classList.remove("drop-target");
-    });
-    row.addEventListener("drop", (rawEvent) => {
-      const event = rawEvent as DragEvent;
-      row.classList.remove("drop-target");
-      if (!event.dataTransfer) return;
-      const itemIDs = parseZoteroItemDrop(
-        event.dataTransfer.getData(ZOTERO_ITEM_DRAG_TYPE),
-      );
-      if (!itemIDs.length) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void addDroppedItemsToTag(itemIDs, dropTagName);
-    });
+    row.addEventListener("dragend", cleanupDragGhost);
+    bindItemDropOntoTagElement(row, tagName);
   }
+
   return row;
 }
 
-async function addDroppedItemsToTag(
+function handleTagFilterClick(tagName: string, event: MouseEvent): void {
+  markSavedFilterDirty();
+  untaggedOnly = false;
+  if (event.altKey) {
+    toggleExcludeTag(tagName);
+    return;
+  }
+  if (event.ctrlKey || event.metaKey) {
+    toggleIncludeTag(tagName);
+    return;
+  }
+  if (
+    includeTags.length === 1 &&
+    includeTags[0] === tagName &&
+    excludeTags.length === 0
+  ) {
+    includeTags = [];
+  } else {
+    includeTags = [tagName];
+    excludeTags = excludeTags.filter((t) => t !== tagName);
+  }
+  void executeUnifiedQuery();
+}
+
+function toggleIncludeTag(tagName: string): void {
+  markSavedFilterDirty();
+  untaggedOnly = false;
+  excludeTags = excludeTags.filter((t) => t !== tagName);
+  if (includeTags.includes(tagName)) {
+    includeTags = includeTags.filter((t) => t !== tagName);
+  } else {
+    includeTags = [...includeTags, tagName];
+  }
+  void executeUnifiedQuery();
+}
+
+function toggleExcludeTag(tagName: string): void {
+  markSavedFilterDirty();
+  untaggedOnly = false;
+  includeTags = includeTags.filter((t) => t !== tagName);
+  if (excludeTags.includes(tagName)) {
+    excludeTags = excludeTags.filter((t) => t !== tagName);
+  } else {
+    excludeTags = [...excludeTags, tagName];
+  }
+  void executeUnifiedQuery();
+}
+
+function bindItemDropOntoTagElement(
+  target: HTMLElement,
+  dropTagName: string,
+): void {
+  target.addEventListener("dragover", (rawEvent) => {
+    const event = rawEvent as DragEvent;
+    if (!event.dataTransfer || !hasZoteroItemDrag(event.dataTransfer.types)) {
+      return;
+    }
+    event.preventDefault();
+    const removeMode = event.altKey;
+    event.dataTransfer.dropEffect = removeMode ? "move" : "copy";
+    target.classList.toggle("drop-target", !removeMode);
+    target.classList.toggle("drop-remove-target", removeMode);
+  });
+  target.addEventListener("dragleave", (rawEvent) => {
+    const event = rawEvent as DragEvent;
+    if (!target.contains(event.relatedTarget as Node | null)) {
+      target.classList.remove("drop-target", "drop-remove-target");
+    }
+  });
+  target.addEventListener("drop", (rawEvent) => {
+    const event = rawEvent as DragEvent;
+    const removeMode = event.altKey;
+    target.classList.remove("drop-target", "drop-remove-target");
+    if (!event.dataTransfer) return;
+    const itemIDs = parseZoteroItemDrop(
+      event.dataTransfer.getData(ZOTERO_ITEM_DRAG_TYPE),
+    );
+    if (!itemIDs.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void mutateDroppedItemsOnTag(itemIDs, dropTagName, removeMode);
+  });
+}
+
+async function mutateDroppedItemsOnTag(
   itemIDs: number[],
   tagName: string,
+  removeMode: boolean,
 ): Promise<void> {
   if (!api || !isCurrentLibraryEditable()) return;
   const preserveIDs = getSelectedItemIDs();
   try {
-    suppressNotificationsUntil = Date.now() + 1200;
-    const result = await api.addTags(itemIDs, tagName);
+    suppressNotificationsUntil = Date.now() + 1400;
+    const result = removeMode
+      ? await api.removeTags(itemIDs, tagName)
+      : await api.addTags(itemIDs, tagName);
     showToast(
-      translate("dropTagApplied", {
+      translate(removeMode ? "dropTagRemoved" : "dropTagApplied", {
         tag: result.tagName,
         count: result.affectedItems,
       }),
@@ -1185,34 +2479,99 @@ async function addDroppedItemsToTag(
   }
 }
 
+function startTagDrag(event: DragEvent, tagName: string): void {
+  if (!event.dataTransfer) return;
+  event.dataTransfer.effectAllowed = "copy";
+  event.dataTransfer.setData(TAGNAVIGATOR_TAG_DRAG_TYPE, tagName);
+  event.dataTransfer.setData("text/plain", tagName);
+  attachDragGhost(event, `#${tagName}`);
+}
+
+function startItemRowDrag(event: DragEvent, rowItem: ItemSummary): void {
+  if (!event.dataTransfer) return;
+  const draggedIDs = selectedItemIDs.has(rowItem.id)
+    ? getSelectedItemIDs()
+    : [rowItem.id];
+  const payload = serializeZoteroItemDrag(draggedIDs);
+  if (!payload) return;
+  event.dataTransfer.effectAllowed = "copyMove";
+  event.dataTransfer.setData(ZOTERO_ITEM_DRAG_TYPE, payload);
+  event.dataTransfer.setData("text/plain", rowItem.title || payload);
+  const label =
+    draggedIDs.length > 1
+      ? translate("dragItemsBadge", { count: draggedIDs.length })
+      : (rowItem.title || translate("untitled")).slice(0, 44);
+  attachDragGhost(event, label);
+}
+
+function attachDragGhost(event: DragEvent, label: string): void {
+  cleanupDragGhost();
+  if (!event.dataTransfer?.setDragImage || !document.body) return;
+  const badge = document.createElement("div");
+  badge.className = "drag-ghost-badge";
+  badge.textContent = label;
+  document.body.appendChild(badge);
+  activeDragGhost = badge;
+  event.dataTransfer.setDragImage(badge, 12, 14);
+}
+
+function cleanupDragGhost(): void {
+  if (activeDragGhost) {
+    activeDragGhost.remove();
+    activeDragGhost = null;
+  }
+}
+
+function autoScrollVirtualContainer(
+  container: HTMLElement,
+  event: DragEvent,
+): void {
+  const rect = container.getBoundingClientRect();
+  const edgeThreshold = 34;
+  if (event.clientY < rect.top + edgeThreshold) {
+    container.scrollTop -= 12;
+  } else if (event.clientY > rect.bottom - edgeThreshold) {
+    container.scrollTop += 12;
+  }
+}
+
+/* ==========================================================================
+ * Context Menus, Tag Actions, Color Palette & Curation
+ * ========================================================================== */
+
 function selectedTagSummary(): TagSummary | null {
-  const scope = currentScope;
-  if (!overview || scope?.kind !== "tag") return null;
-  return overview.tags.find((tag) => tag.name === scope.tagName) || null;
+  if (!overview || !includeTags.length) return null;
+  return overview.tags.find((tag) => tag.name === includeTags[0]) || null;
 }
 
 function updateTagActionButton(): void {
   const button = element<HTMLButtonElement>("tag-actions-button");
   const source = selectedTagSummary();
-  button.disabled = !source || !isCurrentLibraryEditable();
+  button.disabled = !source;
   button.title = source
     ? `${translate("tagActions")}: ${source.name}`
     : translate("tagActions");
   button.setAttribute("aria-label", button.title);
 }
 
-function openTagActionsMenu(
-  source: TagSummary,
+function closeAllContextMenus(): void {
+  for (const id of [
+    "tag-actions-menu",
+    "tag-curation-menu",
+    "columns-menu",
+    "item-context-menu",
+  ]) {
+    element(id).hidden = true;
+  }
+  tagActionSource = null;
+}
+
+function positionContextMenu(
+  menu: HTMLElement,
   x: number,
   y: number,
   alignEnd = false,
 ): void {
-  if (!isCurrentLibraryEditable()) {
-    showToast(translate("readOnlyLibrary"), true);
-    return;
-  }
-  const menu = element("tag-actions-menu");
-  tagActionSource = source;
   menu.hidden = false;
   const bounds = menu.getBoundingClientRect();
   const preferredLeft = alignEnd ? x - bounds.width : x;
@@ -1224,60 +2583,308 @@ function openTagActionsMenu(
     6,
     Math.min(y, window.innerHeight - bounds.height - 6),
   )}px`;
+}
+
+function openTagActionsMenu(
+  source: TagSummary,
+  x: number,
+  y: number,
+  alignEnd = false,
+): void {
+  closeAllContextMenus();
+  const editable = isCurrentLibraryEditable();
+  const menu = element("tag-actions-menu");
+  tagActionSource = source;
+
+  const removeColorBtn = element<HTMLButtonElement>("tag-menu-remove-color");
+  removeColorBtn.hidden = !source.color;
+  removeColorBtn.disabled = !editable;
+
+  const convertBtn = element<HTMLButtonElement>("tag-menu-convert-manual");
+  convertBtn.hidden = source.automaticCount === 0;
+  convertBtn.disabled = !editable;
+
+  menu
+    .querySelectorAll<HTMLButtonElement>("button[data-tag-action]")
+    .forEach((btn: HTMLButtonElement) => {
+      const act = btn.dataset.tagAction;
+      if (act === "filter-and" || act === "filter-not") {
+        btn.disabled = false;
+      } else {
+        btn.disabled = !editable;
+      }
+    });
+
+  positionContextMenu(menu, x, y, alignEnd);
   window.setTimeout(
-    () => (menu.querySelector("button") as HTMLButtonElement | null)?.focus(),
+    () =>
+      menu
+        .querySelector<HTMLButtonElement>("button:not([hidden]):not(:disabled)")
+        ?.focus(),
     0,
   );
 }
 
-function closeTagActionsMenu(): void {
-  element("tag-actions-menu").hidden = true;
-  tagActionSource = null;
+function openTagCurationMenu(anchor: HTMLElement): void {
+  closeAllContextMenus();
+  const menu = element("tag-curation-menu");
+  const removeAutoBtn = element<HTMLButtonElement>("curation-remove-auto");
+  const hasAuto = Boolean(overview?.tags.some((t) => t.automaticCount > 0));
+  removeAutoBtn.disabled = !isCurrentLibraryEditable() || !hasAuto;
+  const rect = anchor.getBoundingClientRect();
+  positionContextMenu(menu, rect.right, rect.bottom + 3, true);
+}
+
+function openItemContextMenu(x: number, y: number): void {
+  closeAllContextMenus();
+  const menu = element("item-context-menu");
+  const slotsSection = element("item-context-colored-section");
+  const slotsContainer = element("item-context-colored-slots");
+  const slots = overview?.coloredTags || [];
+
+  if (slots.length && isCurrentLibraryEditable() && selectedItemIDs.size > 0) {
+    const fragment = document.createDocumentFragment();
+    for (const slot of slots) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "colored-slot-pill";
+      btn.style.setProperty("--tag-bg", slot.color);
+      btn.style.setProperty("--tag-fg", getContrastingTextColor(slot.color));
+      btn.title = `[${slot.position}] ${slot.name}`;
+      btn.textContent = `${slot.position} · ${slot.name}`;
+      btn.addEventListener("click", () => {
+        closeAllContextMenus();
+        void toggleColoredSlotOnSelection(slot.position);
+      });
+      fragment.appendChild(btn);
+    }
+    slotsContainer.replaceChildren(fragment);
+    slotsSection.hidden = false;
+  } else {
+    slotsSection.hidden = true;
+  }
+
+  positionContextMenu(menu, x, y, false);
+}
+
+function openTagColorDialog(source: TagSummary): void {
+  if (!isCurrentLibraryEditable()) {
+    showToast(translate("readOnlyLibrary"), true);
+    return;
+  }
+  colorDialogSource = source;
+  element("tag-color-description").textContent = translate(
+    "assignColorDescription",
+    { tag: source.name },
+  );
+  element("tag-color-error").hidden = true;
+  element("tag-color-remove").hidden = !source.color;
+
+  const initialColor =
+    normalizeHexColor(source.color || "") ||
+    ZOTERO_TAG_PALETTE[
+      Math.min(overview?.coloredTags.length || 0, ZOTERO_TAG_PALETTE.length - 1)
+    ];
+  element<HTMLInputElement>("tag-color-picker").value = initialColor;
+  element<HTMLInputElement>("tag-color-hex").value = initialColor;
+
+  const swatches = element("tag-color-swatches");
+  const swatchFrag = document.createDocumentFragment();
+  for (const hex of ZOTERO_TAG_PALETTE) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "palette-swatch-button";
+    btn.style.backgroundColor = hex;
+    btn.dataset.swatchColor = hex;
+    btn.title = hex;
+    btn.setAttribute("aria-label", hex);
+    btn.addEventListener("click", () => {
+      element<HTMLInputElement>("tag-color-picker").value = hex;
+      element<HTMLInputElement>("tag-color-hex").value = hex;
+      highlightSelectedPaletteSwatch(hex);
+    });
+    swatchFrag.appendChild(btn);
+  }
+  swatches.replaceChildren(swatchFrag);
+  highlightSelectedPaletteSwatch(initialColor);
+
+  const posSelect = element<HTMLSelectElement>("tag-color-position");
+  const posFrag = document.createDocumentFragment();
+  const coloredSlots = overview?.coloredTags || [];
+  const maxPos = source.colorPosition
+    ? coloredSlots.length
+    : Math.min(MAX_COLORED_TAG_SLOTS, coloredSlots.length + 1);
+  for (let pos = 1; pos <= Math.max(1, maxPos); pos++) {
+    const existing = coloredSlots.find((s) => s.position === pos);
+    const label = !existing
+      ? translate("slotFree", { pos })
+      : existing.name === source.name
+        ? translate("slotCurrent", { pos, tag: existing.name })
+        : translate("slotUsed", { pos, tag: existing.name });
+    posFrag.appendChild(createOption(String(pos), label));
+  }
+  posSelect.replaceChildren(posFrag);
+  posSelect.value = String(source.colorPosition || maxPos);
+
+  const dialog = element<HTMLDialogElement>("tag-color-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function highlightSelectedPaletteSwatch(hex: string): void {
+  const normalized = normalizeHexColor(hex);
+  element("tag-color-swatches")
+    .querySelectorAll<HTMLButtonElement>(".palette-swatch-button")
+    .forEach((btn: HTMLButtonElement) => {
+      btn.classList.toggle("selected", btn.dataset.swatchColor === normalized);
+    });
+}
+
+function closeTagColorDialog(): void {
+  const dialog = element<HTMLDialogElement>("tag-color-dialog");
+  if (dialog.open) dialog.close();
+  colorDialogSource = null;
+}
+
+async function submitTagColorDialog(): Promise<void> {
+  if (!api || !colorDialogSource) return;
+  const source = colorDialogSource;
+  const hex = normalizeHexColor(
+    element<HTMLInputElement>("tag-color-hex").value,
+  );
+  const errorEl = element("tag-color-error");
+  if (!hex) {
+    errorEl.textContent = translate("errorInvalidColor");
+    errorEl.hidden = false;
+    return;
+  }
+  const position =
+    Number(element<HTMLSelectElement>("tag-color-position").value) || 1;
+  errorEl.hidden = true;
+
+  try {
+    suppressNotificationsUntil = Date.now() + 1800;
+    await api.setTagColor(currentLibraryID, source.name, hex, position);
+    closeTagColorDialog();
+    showToast(translate("tagColorSaved", { pos: position, tag: source.name }));
+    await refreshAfterMutation(getSelectedItemIDs());
+  } catch (error) {
+    errorEl.textContent = friendlyError(error);
+    errorEl.hidden = false;
+  }
+}
+
+async function removeColorFromTag(tagName: string): Promise<void> {
+  if (!api || !isCurrentLibraryEditable()) return;
+  try {
+    suppressNotificationsUntil = Date.now() + 1800;
+    await api.setTagColor(currentLibraryID, tagName, null);
+    showToast(translate("tagColorRemoved", { tag: tagName }));
+    await refreshAfterMutation(getSelectedItemIDs());
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function toggleColoredSlotOnSelection(position: number): Promise<void> {
+  if (!api || !isCurrentLibraryEditable()) return;
+  const itemIDs = getSelectedItemIDs();
+  if (!itemIDs.length) return;
+  try {
+    suppressNotificationsUntil = Date.now() + 1500;
+    const result = await api.toggleColoredTagByPosition(
+      currentLibraryID,
+      itemIDs,
+      position,
+    );
+    if (!result) return;
+    showToast(
+      translate(result.action === "add" ? "batchTagAdded" : "batchTagRemoved", {
+        tag: result.tagName,
+        count: result.affectedItems,
+      }),
+    );
+    await refreshAfterMutation(itemIDs);
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function openTagActionDialog(mode: TagActionMode, source: TagSummary): void {
-  closeTagActionsMenu();
+  closeAllContextMenus();
   tagActionMode = mode;
   tagActionSource = source;
   tagActionAutocompleteMatches = [];
   tagActionAutocompleteIndex = -1;
 
-  const keys = {
+  const keys: Record<
+    TagActionMode,
+    {
+      title: string;
+      description: string;
+      label: string;
+      confirm: string;
+      danger?: boolean;
+      needsInput?: boolean;
+    }
+  > = {
     rename: {
       title: "renameTagTitle",
       description: "renameTagDescription",
       label: "newTagName",
       confirm: "confirmRename",
+      needsInput: true,
     },
     merge: {
       title: "mergeTagTitle",
       description: "mergeTagDescription",
       label: "mergeTarget",
       confirm: "confirmMerge",
+      needsInput: true,
     },
     delete: {
       title: "deleteTagTitle",
       description: "deleteTagDescription",
       label: "mergeTarget",
       confirm: "confirmDelete",
+      danger: true,
     },
-  }[mode];
+    convertToManual: {
+      title: "convertAutoTitle",
+      description: "convertAutoDescription",
+      label: "newTagName",
+      confirm: "confirmConvertAuto",
+    },
+    removeAllAutomatic: {
+      title: "removeAllAutoTitle",
+      description: "removeAllAutoDescription",
+      label: "newTagName",
+      confirm: "confirmRemoveAllAuto",
+      danger: true,
+    },
+  };
 
-  element("tag-action-title").textContent = translate(keys.title);
-  element("tag-action-description").textContent = translate(keys.description, {
-    tag: source.name,
-    count: source.count.toLocaleString(language),
-  });
-  element("tag-action-target-label").textContent = translate(keys.label);
+  const config = keys[mode];
+  element("tag-action-title").textContent = translate(config.title);
+  element("tag-action-description").textContent = translate(
+    config.description,
+    {
+      tag: source.name,
+      count: (mode === "convertToManual"
+        ? source.automaticCount
+        : source.count
+      ).toLocaleString(language),
+    },
+  );
+  element("tag-action-target-label").textContent = translate(config.label);
   const field = element("tag-action-target-field");
-  field.hidden = mode === "delete";
+  field.hidden = !config.needsInput;
   const input = element<HTMLInputElement>("tag-action-target");
   input.value = mode === "rename" ? source.name : "";
   input.placeholder =
     mode === "merge" ? translate("mergeTargetPlaceholder") : "";
   const confirm = element<HTMLButtonElement>("tag-action-confirm");
-  confirm.textContent = translate(keys.confirm);
-  confirm.classList.toggle("danger", mode === "delete");
+  confirm.textContent = translate(config.confirm);
+  confirm.classList.toggle("danger", Boolean(config.danger));
   confirm.disabled = false;
   element<HTMLButtonElement>("tag-action-cancel").disabled = false;
   element<HTMLButtonElement>("tag-action-close").disabled = false;
@@ -1286,7 +2893,7 @@ function openTagActionDialog(mode: TagActionMode, source: TagSummary): void {
 
   const dialog = element<HTMLDialogElement>("tag-action-dialog");
   if (!dialog.open) dialog.showModal();
-  if (mode !== "delete") {
+  if (config.needsInput) {
     window.setTimeout(() => {
       input.focus();
       if (mode === "rename") input.select();
@@ -1400,6 +3007,13 @@ async function submitTagAction(): Promise<void> {
       result = await api.renameTag(currentLibraryID, source.name, target);
     } else if (mode === "merge") {
       result = await api.mergeTags(currentLibraryID, source.name, target);
+    } else if (mode === "convertToManual") {
+      result = await api.convertAutomaticTagToManual(
+        currentLibraryID,
+        source.name,
+      );
+    } else if (mode === "removeAllAutomatic") {
+      result = await api.removeAutomaticTags(currentLibraryID);
     } else {
       result = await api.deleteTag(currentLibraryID, source.name);
     }
@@ -1430,8 +3044,10 @@ async function refreshAfterBulkTagMutation(
   overview = await api.getTagOverview(currentLibraryID);
   updateTagRows();
 
-  if (result.action === "delete" || !result.targetName) {
-    await enterLibrarySearch();
+  if (result.action === "delete") {
+    includeTags = includeTags.filter((t) => t !== result.sourceName);
+    excludeTags = excludeTags.filter((t) => t !== result.sourceName);
+    await executeUnifiedQuery();
     showToast(
       translate("libraryTagDeleted", {
         tag: result.sourceName,
@@ -1441,151 +3057,420 @@ async function refreshAfterBulkTagMutation(
     return;
   }
 
-  await selectScope({ kind: "tag", tagName: result.targetName });
-  showToast(
-    translate(result.action === "merge" ? "tagsMerged" : "tagRenamed", {
-      source: result.sourceName,
-      target: result.targetName,
-      count: result.affectedItems.toLocaleString(language),
-    }),
-  );
-}
+  if (result.action === "convertToManual") {
+    await executeUnifiedQuery({ preserveItemIDs: getSelectedItemIDs() });
+    showToast(
+      translate("tagConvertedManual", {
+        tag: result.sourceName,
+        count: result.affectedItems.toLocaleString(language),
+      }),
+    );
+    return;
+  }
 
-async function selectScope(scope: ItemScope): Promise<void> {
-  if (!api || !overview) return;
-  if (!applyingSavedFilter) clearSavedFilterSelection();
-  const token = ++itemLoadToken;
-  currentScope = scope;
-  libraryResultsMode = null;
-  selectedItemID = null;
-  selectedItemIDs.clear();
-  selectionAnchorID = null;
-  selectedDetails = null;
-  allItems = [];
-  visibleItems = [];
-  resetInspector();
-  closeTagActionsMenu();
-  tagVirtualList.refresh();
-  resetFilters();
-  setItemSearchMode(false);
-  updateTagActionButton();
-  setItemControlsEnabled(false);
-  showItemsEmpty("loadingItems", "");
-  element("results-title").textContent = scopeLabel(scope);
-  element("results-count").textContent = "…";
-  element("items-status").textContent = translate("loadingItems");
-  hideError();
+  if (result.action === "removeAllAutomatic") {
+    const validNames = new Set(overview.tags.map((t) => t.name));
+    includeTags = includeTags.filter((t) => validNames.has(t));
+    excludeTags = excludeTags.filter((t) => validNames.has(t));
+    await executeUnifiedQuery({ preserveItemIDs: getSelectedItemIDs() });
+    showToast(
+      translate("allAutoTagsRemoved", {
+        count: result.affectedItems.toLocaleString(language),
+      }),
+    );
+    return;
+  }
 
-  try {
-    const items = await api.getItems(currentLibraryID, scope);
-    if (token !== itemLoadToken) return;
-    allItems = items;
-    populateItemFilterOptions();
-    setItemControlsEnabled(true);
-    applyItemFilters();
-  } catch (error) {
-    if (token === itemLoadToken) {
-      showError(error, () => selectScope(scope));
-      showItemsEmpty("emptyTagTitle", "emptyTagBody");
-    }
+  if (result.targetName) {
+    includeTags = includeTags.map((t) =>
+      t === result.sourceName ? result.targetName! : t,
+    );
+    includeTags = Array.from(new Set(includeTags));
+    if (!includeTags.length) includeTags = [result.targetName];
+    await executeUnifiedQuery();
+    showToast(
+      translate(result.action === "merge" ? "tagsMerged" : "tagRenamed", {
+        source: result.sourceName,
+        target: result.targetName,
+        count: result.affectedItems.toLocaleString(language),
+      }),
+    );
   }
 }
 
-async function enterLibrarySearch(): Promise<void> {
-  window.clearTimeout(librarySearchTimer);
-  ++detailLoadToken;
-  currentScope = null;
-  libraryResultsMode = "recent";
-  librarySearchQuery = "";
-  librarySearchTotal = 0;
-  librarySearchLimited = false;
-  selectedItemID = null;
-  selectedItemIDs.clear();
-  selectionAnchorID = null;
-  selectedDetails = null;
-  allItems = [];
-  visibleItems = [];
-  resetInspector();
-  resetFilters();
-  setItemSearchMode(true);
-  setItemControlsEnabled(false);
-  element<HTMLInputElement>("item-search").disabled = false;
-  itemVirtualList.setItems([]);
-  tagVirtualList.refresh();
-  closeTagActionsMenu();
-  updateTagActionButton();
-  sortKey = "dateModified";
-  sortDirection = "descending";
-  await loadRecentItems();
-}
+/* ==========================================================================
+ * Advanced Search Builder & Active Filter Strip
+ * ========================================================================== */
 
-async function loadRecentItems(preserveItemIDs: number[] = []): Promise<void> {
-  if (!api || currentScope) return;
-  const token = ++itemLoadToken;
-  libraryResultsMode = "recent";
-  librarySearchQuery = "";
-  selectedItemIDs = new Set(preserveItemIDs);
-  selectedItemID = preserveItemIDs[0] || null;
-  if (!preserveItemIDs.length) resetInspector();
-  element("results-title").textContent = translate("recentItems");
-  element("results-count").textContent = "…";
-  element("items-status").textContent = translate("loadingItems");
-  setResultFilterControlsEnabled(false);
-  showItemsEmpty("loadingItems", "");
-  hideError();
-
-  try {
-    const result = await api.getRecentItems(currentLibraryID);
-    if (
-      token !== itemLoadToken ||
-      currentScope ||
-      element<HTMLInputElement>("item-search").value.trim()
-    ) {
-      return;
-    }
-    allItems = result.items;
-    librarySearchTotal = result.total;
-    librarySearchLimited = result.limited;
-    populateItemFilterOptions();
-    setResultFilterControlsEnabled(allItems.length > 0);
-    applyItemFilters();
-    await restoreItemSelection(preserveItemIDs);
-  } catch (error) {
-    if (token !== itemLoadToken) return;
-    showError(error, () => loadRecentItems(preserveItemIDs));
-    showItemsEmpty("noItemsTitle", "noItemsBody");
+function toggleAdvancedSearchPanel(): void {
+  const panel = element("advanced-search-panel");
+  const button = element("advanced-search-toggle");
+  panel.hidden = !panel.hidden;
+  button.setAttribute("aria-expanded", String(!panel.hidden));
+  if (!panel.hidden && advancedConditions.length === 0) {
+    advancedConditions.push({
+      condition: "title",
+      operator: "contains",
+      value: "",
+    });
+    renderAdvancedConditionRows();
   }
 }
 
-function setItemSearchMode(global: boolean): void {
+function getConditionDefinitions(): SearchConditionDefinition[] {
+  return bootstrap?.searchConditions?.length
+    ? bootstrap.searchConditions
+    : [
+        {
+          name: "title",
+          label: translate("title"),
+          operators: [
+            "contains",
+            "doesNotContain",
+            "is",
+            "isNot",
+            "beginsWith",
+          ],
+        },
+      ];
+}
+
+function renderAdvancedConditionRows(): void {
+  const container = element("advanced-conditions-list");
+  const defs = getConditionDefinitions();
+  const fragment = document.createDocumentFragment();
+
+  advancedConditions.forEach((row, index) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "advanced-condition-row";
+
+    const condSelect = document.createElement("select");
+    condSelect.className = "advanced-condition-field";
+    for (const def of defs) {
+      condSelect.appendChild(createOption(def.name, def.label));
+    }
+    if (!defs.some((d) => d.name === row.condition)) {
+      row.condition = defs[0].name;
+    }
+    condSelect.value = row.condition;
+
+    const currentDef = defs.find((d) => d.name === row.condition) || defs[0];
+    const opSelect = document.createElement("select");
+    opSelect.className = "advanced-condition-operator";
+    for (const op of currentDef.operators) {
+      opSelect.appendChild(createOption(op, translateOperator(op)));
+    }
+    if (!currentDef.operators.includes(row.operator)) {
+      row.operator = currentDef.operators[0] || "contains";
+    }
+    opSelect.value = row.operator;
+
+    const valueControl = buildAdvancedConditionValueControl(row);
+
+    condSelect.addEventListener("change", () => {
+      markSavedFilterDirty();
+      row.condition = condSelect.value;
+      const nextDef = defs.find((d) => d.name === row.condition) || defs[0];
+      if (!nextDef.operators.includes(row.operator)) {
+        row.operator = nextDef.operators[0] || "contains";
+      }
+      if (row.condition === "itemType" || row.condition === "collection") {
+        row.value = "";
+      }
+      renderAdvancedConditionRows();
+    });
+
+    opSelect.addEventListener("change", () => {
+      markSavedFilterDirty();
+      row.operator = opSelect.value;
+      renderAdvancedConditionRows();
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "icon-button compact";
+    removeBtn.title = translate("removeCondition");
+    removeBtn.setAttribute("aria-label", removeBtn.title);
+    removeBtn.appendChild(
+      createIcon("chrome://zotero/skin/16/universal/x-8.svg"),
+    );
+    removeBtn.addEventListener("click", () => {
+      markSavedFilterDirty();
+      advancedConditions.splice(index, 1);
+      if (!advancedConditions.length) {
+        advancedConditions.push({
+          condition: "title",
+          operator: "contains",
+          value: "",
+        });
+      }
+      renderAdvancedConditionRows();
+      updateAdvancedConditionBadge();
+      void executeUnifiedQuery();
+    });
+
+    rowEl.append(condSelect, opSelect, valueControl, removeBtn);
+    fragment.appendChild(rowEl);
+  });
+
+  container.replaceChildren(fragment);
+  element<HTMLSelectElement>("advanced-join-mode").value = joinMode;
+  element<HTMLInputElement>("include-subcollections").checked =
+    includeSubcollections;
+}
+
+function buildAdvancedConditionValueControl(
+  row: AdvancedSearchCondition,
+): HTMLElement {
+  if (UNARY_OPERATORS.has(row.operator)) {
+    const placeholder = document.createElement("input");
+    placeholder.type = "text";
+    placeholder.value = "—";
+    placeholder.disabled = true;
+    return placeholder;
+  }
+
+  if (row.condition === "itemType" && bootstrap?.itemTypes?.length) {
+    const select = document.createElement("select");
+    select.className = "advanced-condition-value";
+    for (const itemType of bootstrap.itemTypes) {
+      select.appendChild(createOption(itemType.name, itemType.label));
+    }
+    if (!row.value || !bootstrap.itemTypes.some((t) => t.name === row.value)) {
+      row.value = bootstrap.itemTypes[0].name;
+    }
+    select.value = row.value;
+    select.addEventListener("change", () => {
+      markSavedFilterDirty();
+      row.value = select.value;
+      updateAdvancedConditionBadge();
+    });
+    return select;
+  }
+
+  if (row.condition === "collection" && collections.length) {
+    const select = document.createElement("select");
+    select.className = "advanced-condition-value";
+    for (const col of collections) {
+      select.appendChild(createOption(col.key, col.path));
+    }
+    if (!row.value || !collections.some((c) => c.key === row.value)) {
+      row.value = collections[0].key;
+    }
+    select.value = row.value;
+    select.addEventListener("change", () => {
+      markSavedFilterDirty();
+      row.value = select.value;
+      updateAdvancedConditionBadge();
+    });
+    return select;
+  }
+
+  const input = document.createElement("input");
+  input.className = "advanced-condition-value";
+  if (
+    (row.condition === "dateAdded" || row.condition === "dateModified") &&
+    row.operator !== "isInTheLast"
+  ) {
+    input.type = "date";
+  } else {
+    input.type = "text";
+  }
+  input.value = row.value;
+  input.addEventListener("input", () => {
+    markSavedFilterDirty();
+    row.value = input.value;
+    updateAdvancedConditionBadge();
+  });
+  input.addEventListener("keydown", (rawEvent) => {
+    const event = rawEvent as KeyboardEvent;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      updateAdvancedConditionBadge();
+      void executeUnifiedQuery();
+    }
+  });
+  return input;
+}
+
+function updateAdvancedConditionBadge(): void {
+  const count = activeAdvancedConditions().length;
+  const badge = element("advanced-condition-count");
+  badge.textContent = String(count);
+  badge.hidden = count === 0;
+}
+
+function renderActiveFilterPills(): void {
+  const strip = element("active-filters-strip");
+  const container = element("active-filter-pills");
+  const pills: Array<{
+    label: string;
+    kind: "and" | "not" | "neutral";
+    clear: () => void;
+  }> = [];
+
+  if (untaggedOnly) {
+    pills.push({
+      label: translate("untagged"),
+      kind: "and",
+      clear: () => {
+        untaggedOnly = false;
+        void executeUnifiedQuery();
+      },
+    });
+  }
+  for (const tag of includeTags) {
+    pills.push({
+      label: `+ #${tag}`,
+      kind: "and",
+      clear: () => toggleIncludeTag(tag),
+    });
+  }
+  for (const tag of excludeTags) {
+    pills.push({
+      label: `− #${tag}`,
+      kind: "not",
+      clear: () => toggleExcludeTag(tag),
+    });
+  }
+  if (activeCollectionID !== null) {
+    const col = collections.find((c) => c.id === activeCollectionID);
+    pills.push({
+      label: `📁 ${col?.path || activeCollectionID}`,
+      kind: "neutral",
+      clear: () => {
+        activeCollectionID = null;
+        populateScopeCollectionSelect();
+        void executeUnifiedQuery();
+      },
+    });
+  } else if (unfiledOnly) {
+    pills.push({
+      label: `📁 ${translate("unfiledItemsScope")}`,
+      kind: "neutral",
+      clear: () => {
+        unfiledOnly = false;
+        populateScopeCollectionSelect();
+        void executeUnifiedQuery();
+      },
+    });
+  } else if (activeSavedSearchID !== null) {
+    const search = savedSearches.find((s) => s.id === activeSavedSearchID);
+    pills.push({
+      label: `🔍 ${search?.name || activeSavedSearchID}`,
+      kind: "neutral",
+      clear: () => {
+        activeSavedSearchID = null;
+        populateScopeCollectionSelect();
+        void executeUnifiedQuery();
+      },
+    });
+  }
+
+  const qs = element<HTMLInputElement>("item-search").value.trim();
+  if (qs) {
+    pills.push({
+      label: `“${qs}”`,
+      kind: "neutral",
+      clear: () => {
+        element<HTMLInputElement>("item-search").value = "";
+        handleItemSearchInput();
+      },
+    });
+  }
+
+  for (const cond of activeAdvancedConditions()) {
+    const def = getConditionDefinitions().find(
+      (d) => d.name === cond.condition,
+    );
+    pills.push({
+      label: `${def?.label || cond.condition} ${translateOperator(cond.operator)}${cond.value ? ` ${cond.value}` : ""}`,
+      kind: "neutral",
+      clear: () => {
+        advancedConditions = advancedConditions.filter((c) => c !== cond);
+        renderAdvancedConditionRows();
+        updateAdvancedConditionBadge();
+        void executeUnifiedQuery();
+      },
+    });
+  }
+
+  if (!pills.length) {
+    strip.hidden = true;
+    container.replaceChildren();
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const entry of pills) {
+    const pill = document.createElement("span");
+    pill.className = `active-pill ${entry.kind === "and" ? "pill-and" : entry.kind === "not" ? "pill-not" : ""}`;
+    const text = document.createElement("span");
+    text.textContent = entry.label;
+    text.title = entry.label;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.title = `${translate("dismiss")}: ${entry.label}`;
+    btn.setAttribute("aria-label", btn.title);
+    btn.textContent = "×";
+    btn.addEventListener("click", () => {
+      markSavedFilterDirty();
+      entry.clear();
+    });
+    pill.append(text, btn);
+    fragment.appendChild(pill);
+  }
+  container.replaceChildren(fragment);
+  strip.hidden = false;
+}
+
+async function clearAllActiveFilters(): Promise<void> {
+  markSavedFilterDirty();
+  includeTags = [];
+  excludeTags = [];
+  untaggedOnly = false;
+  activeCollectionID = null;
+  unfiledOnly = false;
+  activeSavedSearchID = null;
+  advancedConditions = [];
+  element<HTMLInputElement>("item-search").value = "";
+  element("clear-item-search").hidden = true;
+  populateScopeCollectionSelect();
+  renderAdvancedConditionRows();
+  updateAdvancedConditionBadge();
+  resetClientFilters();
+  await executeUnifiedQuery();
+}
+
+/* ==========================================================================
+ * Quick Search, Client Refinement Filters & Item Table
+ * ========================================================================== */
+
+function handleItemSearchInput(): void {
+  markSavedFilterDirty();
   const input = element<HTMLInputElement>("item-search");
-  const label = translate(global ? "searchLibrary" : "searchItems");
-  input.placeholder = label;
-  input.setAttribute("aria-label", label);
-}
+  element("clear-item-search").hidden = !input.value;
+  updateActiveFilterCount();
+  renderActiveFilterPills();
 
-function scopeLabel(scope: ItemScope): string {
-  return scope.kind === "untagged" ? translate("untagged") : scope.tagName;
-}
-
-function scopesEqual(left: ItemScope, right: ItemScope | null): boolean {
-  if (!right || left.kind !== right.kind) return false;
-  return (
-    left.kind === "untagged" ||
-    (right.kind === "tag" && left.tagName === right.tagName)
-  );
+  window.clearTimeout(quickSearchTimer);
+  quickSearchTimer = window.setTimeout(() => {
+    void executeUnifiedQuery();
+  }, 220);
 }
 
 function populateItemFilterOptions(): void {
   const authorSelect = element<HTMLSelectElement>("author-filter");
   const tagSelect = element<HTMLSelectElement>("second-tag-filter");
+  const prevAuthor = authorSelect.value;
+  const prevTag = tagSelect.value;
   const authors = new Set<string>();
   const tags = new Set<string>();
 
   for (const item of allItems) {
     item.creators.forEach((creator) => authors.add(creator));
     item.tags.forEach((tag) => {
-      if (currentScope?.kind !== "tag" || tag.name !== currentScope.tagName) {
+      if (!includeTags.includes(tag.name)) {
         tags.add(tag.name);
       }
     });
@@ -1597,93 +3482,16 @@ function populateItemFilterOptions(): void {
     .forEach((author) =>
       authorSelect.appendChild(createOption(author, author)),
     );
+  if (prevAuthor && authors.has(prevAuthor)) authorSelect.value = prevAuthor;
 
   tagSelect.replaceChildren(createOption("", translate("anyTag")));
   Array.from(tags)
     .sort((a, b) => a.localeCompare(b, language))
     .forEach((tag) => tagSelect.appendChild(createOption(tag, tag)));
+  if (prevTag && tags.has(prevTag)) tagSelect.value = prevTag;
 }
 
-function createOption(value: string, label: string): HTMLOptionElement {
-  const option = document.createElement("option");
-  option.value = value;
-  option.textContent = label;
-  return option;
-}
-
-function handleItemSearchInput(): void {
-  markSavedFilterDirty();
-  const input = element<HTMLInputElement>("item-search");
-  input.parentElement
-    ?.querySelector("button")
-    ?.toggleAttribute("hidden", !input.value);
-  updateActiveFilterCount();
-
-  if (currentScope) {
-    applyItemFilters();
-    return;
-  }
-
-  window.clearTimeout(librarySearchTimer);
-  ++itemLoadToken;
-  const query = input.value.trim();
-  if (!query) {
-    void loadRecentItems();
-    return;
-  }
-
-  libraryResultsMode = "search";
-  element("results-count").textContent = "…";
-  element("items-status").textContent = translate("searchingLibrary");
-  setResultFilterControlsEnabled(false);
-  showItemsEmpty("searchingLibrary", "");
-  librarySearchTimer = window.setTimeout(
-    () => void searchWholeLibrary(query),
-    250,
-  );
-}
-
-async function searchWholeLibrary(
-  query: string,
-  preserveItemIDs: number[] = [],
-): Promise<void> {
-  if (!api || currentScope) return;
-  const token = ++itemLoadToken;
-  libraryResultsMode = "search";
-  librarySearchQuery = query;
-  selectedItemIDs = new Set(preserveItemIDs);
-  selectedItemID = preserveItemIDs[0] || null;
-  if (!preserveItemIDs.length) resetInspector();
-  hideError();
-
-  try {
-    const result = await api.searchLibrary(currentLibraryID, query);
-    if (
-      token !== itemLoadToken ||
-      currentScope ||
-      element<HTMLInputElement>("item-search").value.trim() !== query
-    ) {
-      return;
-    }
-    allItems = result.items;
-    librarySearchTotal = result.total;
-    librarySearchLimited = result.limited;
-    populateItemFilterOptions();
-    setResultFilterControlsEnabled(allItems.length > 0);
-    applyItemFilters();
-
-    await restoreItemSelection(preserveItemIDs);
-  } catch (error) {
-    if (token !== itemLoadToken) return;
-    showError(error, () => searchWholeLibrary(query, preserveItemIDs));
-    showItemsEmpty("noItemsTitle", "noItemsBody");
-  }
-}
-
-function applyItemFilters(): void {
-  if (!currentScope && !libraryResultsMode) return;
-  const searchInput = element<HTMLInputElement>("item-search");
-  const query = normalize(searchInput.value);
+function applyItemFilters(preserveScroll = false): void {
   const author = element<HTMLSelectElement>("author-filter").value;
   const secondTag = element<HTMLSelectElement>("second-tag-filter").value;
   const minimum = numberOrNull(element<HTMLInputElement>("year-min").value);
@@ -1697,12 +3505,6 @@ function applyItemFilters(): void {
   const hasNotes = element<HTMLInputElement>("filter-has-notes").checked;
 
   visibleItems = allItems.filter((item) => {
-    if (query && currentScope) {
-      const haystack = normalize(
-        `${item.title}\n${item.abstract}\n${item.creatorSearch}\n${item.citekey}`,
-      );
-      if (!haystack.includes(query)) return false;
-    }
     if (author && !item.creators.includes(author)) return false;
     if (secondTag && !item.tags.some((tag) => tag.name === secondTag))
       return false;
@@ -1727,47 +3529,30 @@ function applyItemFilters(): void {
 
   sortVisibleItems();
   updateActiveFilterCount();
-  searchInput.parentElement
-    ?.querySelector("button")
-    ?.toggleAttribute("hidden", !searchInput.value);
-  if (currentScope) {
-    element("results-count").textContent = String(visibleItems.length);
-    element("items-status").textContent = translate("itemStatus", {
-      visible: visibleItems.length,
-      total: allItems.length,
-    });
-  } else if (libraryResultsMode === "recent") {
-    element("results-count").textContent = String(visibleItems.length);
-    element("items-status").textContent = translate("recentItemsStatus", {
-      visible: visibleItems.length,
-      shown: allItems.length,
-      total: librarySearchTotal.toLocaleString(language),
-    });
-  } else {
-    element("results-count").textContent =
-      librarySearchTotal.toLocaleString(language);
-    element("items-status").textContent = translate(
-      librarySearchLimited
+
+  const filteredActive = isFilteredQueryActive();
+  element("results-count").textContent = queryHasMore
+    ? queryTotal.toLocaleString(language)
+    : String(visibleItems.length);
+  element("items-status").textContent = translate(
+    !filteredActive
+      ? "recentItemsStatus"
+      : queryHasMore
         ? "librarySearchLimitedStatus"
         : "librarySearchStatus",
-      {
-        visible: visibleItems.length,
-        shown: allItems.length,
-        total: librarySearchTotal.toLocaleString(language),
-      },
-    );
-  }
+    {
+      visible: visibleItems.length,
+      shown: allItems.length,
+      total: queryTotal.toLocaleString(language),
+    },
+  );
 
   if (!visibleItems.length) {
     const hadSelection = selectedItemIDs.size > 0;
     selectedItemIDs.clear();
     selectedItemID = null;
     selectionAnchorID = null;
-    if (allItems.length || !currentScope) {
-      showItemsEmpty("noItemsTitle", "noItemsBody");
-    } else {
-      showItemsEmpty("emptyTagTitle", "emptyTagBody");
-    }
+    showItemsEmpty("noItemsTitle", "noItemsBody");
     itemVirtualList.setItems([]);
     updateSelectionControls();
     if (hadSelection) resetInspector();
@@ -1776,7 +3561,7 @@ function applyItemFilters(): void {
 
   element("items-empty").hidden = true;
   element("items-table").hidden = false;
-  itemVirtualList.setItems(visibleItems);
+  itemVirtualList.setItems(visibleItems, preserveScroll);
   const selectionChanged = pruneSelectionToVisibleItems();
   updateSelectionControls();
   if (selectionChanged) void updateInspectorForSelection();
@@ -1842,12 +3627,98 @@ function createTimestampCell(
   return cell;
 }
 
+function renderItemColumnCell(
+  item: ItemSummary,
+  column: ItemColumnKey,
+): HTMLElement {
+  if (column === "title") {
+    const titleCell = document.createElement("span");
+    titleCell.className = "title-column";
+    titleCell.setAttribute("role", "cell");
+
+    const coloredItemTags = item.tags
+      .filter((t) => Boolean(t.color))
+      .sort((a, b) => (a.colorPosition ?? 99) - (b.colorPosition ?? 99))
+      .slice(0, 6);
+    if (coloredItemTags.length) {
+      const swatches = document.createElement("span");
+      swatches.className = "row-color-swatches";
+      for (const ct of coloredItemTags) {
+        const swatch = document.createElement("span");
+        swatch.className = "row-color-swatch";
+        swatch.style.backgroundColor = ct.color!;
+        swatch.title = ct.name;
+        swatches.appendChild(swatch);
+      }
+      titleCell.appendChild(swatches);
+    }
+
+    const titleText = document.createElement("span");
+    titleText.className = "row-title-text";
+    titleText.textContent = item.title || translate("untitled");
+    titleCell.title = item.title || translate("untitled");
+    titleCell.appendChild(titleText);
+    return titleCell;
+  }
+
+  if (column === "creator") {
+    const cell = document.createElement("span");
+    cell.className = "creator-column";
+    cell.setAttribute("role", "cell");
+    cell.textContent = item.firstCreator || translate("unknownCreator");
+    cell.title = item.creators.join(", ");
+    return cell;
+  }
+
+  if (column === "year") {
+    const cell = document.createElement("span");
+    cell.className = "year-column";
+    cell.setAttribute("role", "cell");
+    cell.textContent = item.year ? String(item.year) : "";
+    return cell;
+  }
+
+  if (column === "publication") {
+    const cell = document.createElement("span");
+    cell.className = "publication-column";
+    cell.setAttribute("role", "cell");
+    cell.textContent = item.publicationTitle || "";
+    cell.title = item.publicationTitle || "";
+    return cell;
+  }
+
+  if (column === "itemType") {
+    const cell = document.createElement("span");
+    cell.className = "item-type-column";
+    cell.setAttribute("role", "cell");
+    cell.textContent = item.itemTypeLabel || "";
+    cell.title = item.itemTypeLabel || "";
+    return cell;
+  }
+
+  if (column === "citekey") {
+    const cell = document.createElement("span");
+    cell.className = "citekey-column";
+    cell.setAttribute("role", "cell");
+    cell.textContent = item.citekey || "";
+    cell.title = item.citekey || "";
+    return cell;
+  }
+
+  if (column === "dateAdded") {
+    return createTimestampCell(item.dateAdded, "date-added-column");
+  }
+
+  return createTimestampCell(item.dateModified, "date-modified-column");
+}
+
 function renderItemRow(item: ItemSummary): HTMLElement {
   const row = document.createElement("div");
   row.className = "item-row";
   row.setAttribute("role", "row");
   row.setAttribute("aria-selected", String(selectedItemIDs.has(item.id)));
   row.dataset.itemId = String(item.id);
+  row.draggable = true;
 
   const typeCell = document.createElement("span");
   typeCell.className = "type-column";
@@ -1869,32 +3740,14 @@ function renderItemRow(item: ItemSummary): HTMLElement {
   const typeIcon = createIcon(item.iconURI, "item-type-icon");
   typeIcon.title = item.itemTypeLabel;
   typeCell.append(checkbox, typeIcon);
+  row.appendChild(typeCell);
 
-  const titleCell = document.createElement("span");
-  titleCell.className = "title-column";
-  titleCell.setAttribute("role", "cell");
-  titleCell.textContent = item.title || translate("untitled");
-  titleCell.title = item.title || translate("untitled");
-
-  const creatorCell = document.createElement("span");
-  creatorCell.className = "creator-column";
-  creatorCell.setAttribute("role", "cell");
-  creatorCell.textContent = item.firstCreator || translate("unknownCreator");
-  creatorCell.title = item.creators.join(", ");
-
-  const yearCell = document.createElement("span");
-  yearCell.className = "year-column";
-  yearCell.setAttribute("role", "cell");
-  yearCell.textContent = item.year ? String(item.year) : "";
-
-  const dateAddedCell = createTimestampCell(
-    item.dateAdded,
-    "date-added-column",
+  const activeCols = ITEM_COLUMN_KEYS.filter((key) =>
+    visibleColumns.includes(key),
   );
-  const dateModifiedCell = createTimestampCell(
-    item.dateModified,
-    "date-modified-column",
-  );
+  for (const col of activeCols) {
+    row.appendChild(renderItemColumnCell(item, col));
+  }
 
   const stateCell = document.createElement("span");
   stateCell.className = "state-column row-state-icons";
@@ -1909,21 +3762,84 @@ function renderItemRow(item: ItemSummary): HTMLElement {
     icon.title = `${translate("hasNotes")}: ${item.noteCount}`;
     stateCell.appendChild(icon);
   }
+  row.appendChild(stateCell);
 
-  row.append(
-    typeCell,
-    titleCell,
-    creatorCell,
-    yearCell,
-    dateAddedCell,
-    dateModifiedCell,
-    stateCell,
-  );
   row.addEventListener("click", (event) =>
     updateItemSelection(item.id, event as MouseEvent, false),
   );
+  row.addEventListener("dblclick", () => {
+    void triggerItemPrimaryAction(item.id);
+  });
+  row.addEventListener("contextmenu", (rawEvent) => {
+    const event = rawEvent as MouseEvent;
+    event.preventDefault();
+    if (!selectedItemIDs.has(item.id)) {
+      updateItemSelection(item.id, event, false);
+    }
+    openItemContextMenu(event.clientX, event.clientY);
+  });
+
+  row.addEventListener("dragstart", (rawEvent) => {
+    startItemRowDrag(rawEvent as DragEvent, item);
+  });
+  row.addEventListener("dragend", cleanupDragGhost);
+
+  // Drop dragged tag onto item row
+  if (isCurrentLibraryEditable()) {
+    row.addEventListener("dragover", (rawEvent) => {
+      const event = rawEvent as DragEvent;
+      if (
+        !event.dataTransfer ||
+        !hasTagNavigatorTagDrag(event.dataTransfer.types)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      row.classList.add("drop-target");
+    });
+    row.addEventListener("dragleave", (rawEvent) => {
+      const event = rawEvent as DragEvent;
+      if (!row.contains(event.relatedTarget as Node | null)) {
+        row.classList.remove("drop-target");
+      }
+    });
+    row.addEventListener("drop", (rawEvent) => {
+      const event = rawEvent as DragEvent;
+      row.classList.remove("drop-target");
+      const tagName = event.dataTransfer?.getData(TAGNAVIGATOR_TAG_DRAG_TYPE);
+      if (!tagName) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const targetIDs = selectedItemIDs.has(item.id)
+        ? getSelectedItemIDs()
+        : [item.id];
+      void mutateDroppedItemsOnTag(targetIDs, tagName, false);
+    });
+  }
+
   return row;
 }
+
+async function triggerItemPrimaryAction(itemID: number): Promise<void> {
+  if (!api || doubleClickAction === "none") return;
+  if (doubleClickAction === "selectInZotero") {
+    await api.selectInMainWindow(itemID);
+    return;
+  }
+  try {
+    const opened = await api.openBestAttachment(itemID);
+    if (!opened) {
+      await api.selectInMainWindow(itemID);
+    }
+  } catch (error) {
+    showError(error);
+  }
+}
+
+/* ==========================================================================
+ * Item Selection & Right Inspector
+ * ========================================================================== */
 
 function updateItemSelection(
   itemID: number,
@@ -2062,11 +3978,16 @@ function renderMultiInspector(itemIDs: number[]): void {
     count: itemIDs.length,
   });
   element("detail-byline").textContent = translate("batchEditing");
+  element("item-abstract-section").hidden = true;
   element("item-info-section").hidden = true;
+  element("item-attachments-section").hidden = true;
   element("item-action-row").hidden = true;
   element("item-tags-heading").textContent = translate("batchTags");
-  renderBatchTags(itemIDs);
-  renderFrequentTagsForSelection(itemIDs);
+
+  const items = visibleItems.filter((item) => itemIDs.includes(item.id));
+  renderBatchTags(items);
+  renderInspectorColoredSlots(commonTagsForItems(items).map((t) => t.name));
+  renderFrequentTagsForSelection(items);
   const editable = isCurrentLibraryEditable();
   element<HTMLInputElement>("quick-tag-add").disabled = !editable;
   element<HTMLFormElement>("add-tag-form").querySelector("button")!.disabled =
@@ -2096,19 +4017,38 @@ function renderInspector(details: ItemDetails): void {
   ]
     .filter(Boolean)
     .join(" · ");
+
+  // Abstract
+  const abstractSection = element("item-abstract-section");
+  if (details.abstract) {
+    element("detail-abstract").textContent = details.abstract;
+    abstractSection.hidden = false;
+  } else {
+    abstractSection.hidden = true;
+  }
+
+  // Metadata & Collections
   setMetadata("detail-item-type", details.itemTypeLabel);
   setMetadata("detail-date", details.date);
   setMetadata("detail-publication", details.publicationTitle);
   setMetadata("detail-doi", details.doi);
   setMetadata("detail-citekey", details.citekey);
+  renderInspectorCollections(details);
   element("item-info-section").hidden = false;
   element("item-action-row").hidden = false;
+
+  // Attachments & Notes
+  renderInspectorAttachmentsAndNotes(details);
+
+  // Tags
   element("item-tags-heading").textContent = translate("tags");
   element("detail-tag-count").textContent = String(details.tags.length);
   element<HTMLButtonElement>("open-attachment").disabled =
     details.attachmentCount === 0;
   renderItemTags(details);
+  renderInspectorColoredSlots(details.tags.map((t) => t.name));
   renderFrequentTags(details);
+
   const editable = isCurrentLibraryEditable();
   element<HTMLInputElement>("quick-tag-add").disabled = !editable;
   element<HTMLFormElement>("add-tag-form").querySelector("button")!.disabled =
@@ -2121,6 +4061,120 @@ function setMetadata(id: string, value: string): void {
   target.title = value || "";
 }
 
+function renderInspectorCollections(details: ItemDetails): void {
+  const container = element("detail-collections");
+  const list = details.collections || [];
+  if (!list.length) {
+    container.textContent = translate("notAvailable");
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  for (const col of list) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "collection-chip";
+    chip.textContent = col.path;
+    chip.title = col.path;
+    chip.addEventListener("click", () => {
+      markSavedFilterDirty();
+      activeCollectionID = col.id;
+      unfiledOnly = false;
+      activeSavedSearchID = null;
+      populateScopeCollectionSelect();
+      void executeUnifiedQuery();
+    });
+    fragment.appendChild(chip);
+  }
+  container.replaceChildren(fragment);
+}
+
+function renderInspectorAttachmentsAndNotes(details: ItemDetails): void {
+  const section = element("item-attachments-section");
+  const attContainer = element("detail-attachments");
+  const notesContainer = element("detail-notes");
+  const attachments = details.attachments || [];
+  const notes = details.notesPreview || [];
+  const totalCount = attachments.length + notes.length;
+
+  element("detail-files-count").textContent = String(totalCount);
+  if (!totalCount) {
+    section.hidden = true;
+    attContainer.replaceChildren();
+    notesContainer.replaceChildren();
+    return;
+  }
+
+  section.hidden = false;
+  const attFrag = document.createDocumentFragment();
+  for (const att of attachments) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "attachment-row-button";
+    btn.title = att.title;
+    btn.appendChild(
+      createIcon("chrome://zotero/skin/16/universal/attachment.svg"),
+    );
+    const label = document.createElement("span");
+    label.textContent = att.title;
+    btn.appendChild(label);
+    btn.addEventListener("click", () => {
+      void api?.openAttachmentByID(att.id);
+    });
+    attFrag.appendChild(btn);
+  }
+  attContainer.replaceChildren(attFrag);
+  attContainer.hidden = attachments.length === 0;
+
+  const noteFrag = document.createDocumentFragment();
+  for (const note of notes) {
+    const div = document.createElement("div");
+    div.className = "note-preview-item";
+    div.textContent = note.snippet;
+    noteFrag.appendChild(div);
+  }
+  notesContainer.replaceChildren(noteFrag);
+  notesContainer.hidden = notes.length === 0;
+}
+
+function createInspectorTagChip(
+  tag: ItemSummary["tags"][number],
+  displayLabel: string,
+  editable: boolean,
+): HTMLElement {
+  const chip = document.createElement("span");
+  chip.className = `tag-chip ${tag.type === 1 ? "automatic" : "manual"}`;
+  if (tag.color) {
+    chip.classList.add("colored-chip");
+    chip.style.setProperty("--tag-bg", tag.color);
+    chip.style.setProperty("--tag-fg", getContrastingTextColor(tag.color));
+  }
+
+  const labelBtn = document.createElement("button");
+  labelBtn.type = "button";
+  labelBtn.className = "tag-chip-label";
+  labelBtn.textContent = displayLabel;
+  labelBtn.title = `${tag.name}\n${translate("booleanTagHint")}`;
+  labelBtn.addEventListener("click", (event) => {
+    handleTagFilterClick(tag.name, event as MouseEvent);
+  });
+  chip.appendChild(labelBtn);
+
+  if (editable) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "tag-chip-remove";
+    remove.title = `${translate("dismiss")}: ${tag.name}`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.appendChild(createIcon("chrome://zotero/skin/16/universal/x-8.svg"));
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void removeSelectedTag(tag.name);
+    });
+    chip.appendChild(remove);
+  }
+  return chip;
+}
+
 function renderItemTags(details: ItemDetails): void {
   const container = element("detail-tags");
   const fragment = document.createDocumentFragment();
@@ -2128,30 +4182,12 @@ function renderItemTags(details: ItemDetails): void {
   for (const tag of details.tags
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name, language))) {
-    const chip = document.createElement("span");
-    chip.className = `tag-chip ${tag.type === 1 ? "automatic" : "manual"}`;
-    const label = document.createElement("span");
-    label.textContent = tag.name;
-    label.title = tag.name;
-    chip.appendChild(label);
-    if (editable) {
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.title = `${translate("dismiss")}: ${tag.name}`;
-      remove.setAttribute("aria-label", remove.title);
-      remove.appendChild(
-        createIcon("chrome://zotero/skin/16/universal/x-8.svg"),
-      );
-      remove.addEventListener("click", () => void removeSelectedTag(tag.name));
-      chip.appendChild(remove);
-    }
-    fragment.appendChild(chip);
+    fragment.appendChild(createInspectorTagChip(tag, tag.name, editable));
   }
   container.replaceChildren(fragment);
 }
 
-function renderBatchTags(itemIDs: number[]): void {
-  const items = visibleItems.filter((item) => itemIDs.includes(item.id));
+function renderBatchTags(items: ItemSummary[]): void {
   const batchTags = tagCoverageForItems(items);
   element("detail-tag-count").textContent = String(batchTags.length);
   const container = element("detail-tags");
@@ -2159,26 +4195,51 @@ function renderBatchTags(itemIDs: number[]): void {
   const editable = isCurrentLibraryEditable();
 
   for (const tag of batchTags) {
-    const chip = document.createElement("span");
-    chip.className = `tag-chip ${tag.type === 1 ? "automatic" : "manual"}`;
-    const label = document.createElement("span");
-    label.textContent = `${tag.name} · ${tag.count}/${items.length}`;
-    label.title = label.textContent;
-    chip.appendChild(label);
-    if (editable) {
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.title = `${translate("dismiss")}: ${tag.name}`;
-      remove.setAttribute("aria-label", remove.title);
-      remove.appendChild(
-        createIcon("chrome://zotero/skin/16/universal/x-8.svg"),
-      );
-      remove.addEventListener("click", () => void removeSelectedTag(tag.name));
-      chip.appendChild(remove);
-    }
-    fragment.appendChild(chip);
+    fragment.appendChild(
+      createInspectorTagChip(
+        tag,
+        `${tag.name} · ${tag.count}/${items.length}`,
+        editable,
+      ),
+    );
   }
   container.replaceChildren(fragment);
+}
+
+function renderInspectorColoredSlots(assignedNames: string[]): void {
+  const block = element("inspector-colored-tags-block");
+  const container = element("inspector-colored-tags");
+  const slots = overview?.coloredTags || [];
+  if (!slots.length || !isCurrentLibraryEditable()) {
+    block.hidden = true;
+    container.replaceChildren();
+    return;
+  }
+
+  const assignedSet = new Set(assignedNames);
+  const fragment = document.createDocumentFragment();
+  for (const slot of slots) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "colored-slot-pill";
+    btn.style.setProperty("--tag-bg", slot.color);
+    btn.style.setProperty("--tag-fg", getContrastingTextColor(slot.color));
+    if (assignedSet.has(slot.name)) btn.classList.add("active-and");
+    btn.title = `[${slot.position}] ${slot.name}`;
+    const num = document.createElement("span");
+    num.className = "colored-slot-num";
+    num.textContent = String(slot.position);
+    const name = document.createElement("span");
+    name.className = "colored-slot-name";
+    name.textContent = slot.name;
+    btn.append(num, name);
+    btn.addEventListener("click", () => {
+      void toggleColoredSlotOnSelection(slot.position);
+    });
+    fragment.appendChild(btn);
+  }
+  container.replaceChildren(fragment);
+  block.hidden = false;
 }
 
 function tagCoverageForItems(
@@ -2221,36 +4282,16 @@ function commonTagsForItems(items: ItemSummary[]): ItemSummary["tags"] {
 }
 
 function renderFrequentTags(details: ItemDetails): void {
-  const container = element("frequent-tags");
-  if (!overview || !isCurrentLibraryEditable()) {
-    container.replaceChildren();
-    frequentTagCandidates = [];
-    return;
-  }
-
-  const assigned = new Set(details.tags.map((tag) => tag.name));
-  frequentTagCandidates = overview.tags
-    .filter((tag) => tag.kind !== "automatic" && !assigned.has(tag.name))
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, language))
-    .slice(0, 5);
-  const fragment = document.createDocumentFragment();
-  frequentTagCandidates.forEach((tag, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "frequent-tag-button";
-    button.title = tag.name;
-    const key = document.createElement("kbd");
-    key.textContent = `Ctrl+${index + 1}`;
-    const label = document.createElement("span");
-    label.textContent = tag.name;
-    button.append(key, label);
-    button.addEventListener("click", () => void addTag(tag.name));
-    fragment.appendChild(button);
-  });
-  container.replaceChildren(fragment);
+  renderFrequentTagButtons(new Set(details.tags.map((tag) => tag.name)));
 }
 
-function renderFrequentTagsForSelection(itemIDs: number[]): void {
+function renderFrequentTagsForSelection(items: ItemSummary[]): void {
+  renderFrequentTagButtons(
+    new Set(commonTagsForItems(items).map((tag) => tag.name)),
+  );
+}
+
+function renderFrequentTagButtons(excludedNames: Set<string>): void {
   const container = element("frequent-tags");
   if (!overview || !isCurrentLibraryEditable()) {
     container.replaceChildren();
@@ -2258,12 +4299,8 @@ function renderFrequentTagsForSelection(itemIDs: number[]): void {
     return;
   }
 
-  const items = visibleItems.filter((item) => itemIDs.includes(item.id));
-  const assignedToAll = new Set(
-    commonTagsForItems(items).map((tag) => tag.name),
-  );
   frequentTagCandidates = overview.tags
-    .filter((tag) => tag.kind !== "automatic" && !assignedToAll.has(tag.name))
+    .filter((tag) => tag.kind !== "automatic" && !excludedNames.has(tag.name))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, language))
     .slice(0, 5);
   const fragment = document.createDocumentFragment();
@@ -2352,20 +4389,10 @@ async function removeSelectedTag(tagName: string): Promise<void> {
 
 async function refreshAfterMutation(preserveIDs: number[]): Promise<void> {
   if (!api) return;
-  const savedScope = currentScope;
-  const savedQuery = element<HTMLInputElement>("item-search").value.trim();
   api.invalidate();
   overview = await api.getTagOverview(currentLibraryID);
   updateTagRows();
-  if (savedScope) {
-    const items = await api.getItems(currentLibraryID, savedScope);
-    allItems = items;
-    populateItemFilterOptions();
-    applyItemFilters();
-    await restoreItemSelection(preserveIDs);
-  } else if (savedQuery) {
-    await searchWholeLibrary(savedQuery, preserveIDs);
-  }
+  await executeUnifiedQuery({ preserveItemIDs: preserveIDs });
 }
 
 function updateTagAutocomplete(): void {
@@ -2437,6 +4464,10 @@ function handleAutocompleteKeyboard(event: KeyboardEvent): void {
   }
 }
 
+/* ==========================================================================
+ * Quick Copy, Attachments & Keyboard Shortcuts
+ * ========================================================================== */
+
 async function copySelected(
   kind: CopyKind,
   styleOverride?: string,
@@ -2487,13 +4518,9 @@ async function copySelected(
 }
 
 async function openSelectedAttachment(): Promise<void> {
-  if (selectedItemID) await openAttachment(selectedItemID);
-}
-
-async function openAttachment(itemID: number): Promise<void> {
-  if (!api) return;
+  if (!api || !selectedItemID) return;
   try {
-    const opened = await api.openBestAttachment(itemID);
+    const opened = await api.openBestAttachment(selectedItemID);
     if (!opened) showToast(translate("noAttachment"), true);
   } catch (error) {
     showError(error);
@@ -2503,12 +4530,17 @@ async function openAttachment(itemID: number): Promise<void> {
 function handleTagListKeyboard(event: KeyboardEvent): void {
   if (event.key === "Escape") {
     event.preventDefault();
-    void enterLibrarySearch();
+    includeTags = [];
+    excludeTags = [];
+    untaggedOnly = false;
+    void executeUnifiedQuery();
     return;
   }
   if (!visibleTagRows.length) return;
   let index = visibleTagRows.findIndex((entry) =>
-    scopesEqual(entry.scope, currentScope),
+    entry.scope.kind === "untagged"
+      ? untaggedOnly
+      : includeTags.includes(entry.scope.tagName),
   );
   if (event.key === "ArrowDown")
     index = Math.min(index + 1, visibleTagRows.length - 1);
@@ -2519,7 +4551,18 @@ function handleTagListKeyboard(event: KeyboardEvent): void {
 
   event.preventDefault();
   tagVirtualList.scrollToIndex(index);
-  void selectScope(visibleTagRows[index].scope);
+  const target = visibleTagRows[index];
+  if (target.scope.kind === "untagged") {
+    untaggedOnly = true;
+    includeTags = [];
+    excludeTags = [];
+  } else {
+    const nextTagName = target.scope.tagName;
+    untaggedOnly = false;
+    includeTags = [nextTagName];
+    excludeTags = excludeTags.filter((t) => t !== nextTagName);
+  }
+  void executeUnifiedQuery();
 }
 
 function handleItemListKeyboard(event: KeyboardEvent): void {
@@ -2527,6 +4570,11 @@ function handleItemListKeyboard(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
     event.preventDefault();
     selectAllVisibleItems();
+    return;
+  }
+  if (event.key === "Enter" && selectedItemID) {
+    event.preventDefault();
+    void triggerItemPrimaryAction(selectedItemID);
     return;
   }
   if (
@@ -2559,6 +4607,10 @@ function handleGlobalKeyboard(event: KeyboardEvent): void {
   const isEditing = target?.matches(
     "input, select, textarea, [contenteditable='true']",
   );
+  const anyDialogOpen = Array.from(
+    document.querySelectorAll("dialog") as unknown as HTMLDialogElement[],
+  ).some((d) => d.open);
+  if (anyDialogOpen) return;
 
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
     event.preventDefault();
@@ -2570,13 +4622,36 @@ function handleGlobalKeyboard(event: KeyboardEvent): void {
     return;
   }
 
+  if (!isEditing && event.key === "?") {
+    event.preventDefault();
+    openShortcutsDialog();
+    return;
+  }
+
   if (
     !isEditing &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    /^[1-9]$/.test(event.key) &&
+    selectedItemIDs.size > 0
+  ) {
+    event.preventDefault();
+    void toggleColoredSlotOnSelection(Number(event.key));
+    return;
+  }
+
+  if (
+    !isEditing &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
     event.key.toLocaleLowerCase() === "c" &&
-    selectedItemIDs.size
+    selectedItemIDs.size > 0
   ) {
     event.preventDefault();
     void copySelected("citekey");
+    return;
   }
 
   if (!isEditing && event.ctrlKey && /^[1-5]$/.test(event.key)) {
@@ -2585,14 +4660,55 @@ function handleGlobalKeyboard(event: KeyboardEvent): void {
       event.preventDefault();
       void addTag(tag.name);
     }
+    return;
   }
 
   if (event.key === "Escape") {
     if (selectedItemIDs.size > 1) clearItemSelection();
     closeAutocomplete();
-    closeTagActionsMenu();
+    closeAllContextMenus();
   }
 }
+
+function renderShortcutsDialogContent(): void {
+  const list = element("shortcuts-list");
+  const rows: Array<[string, string]> = [
+    ["Click", "sc_clickTag"],
+    ["Ctrl / ⌘ + Click", "sc_ctrlClickTag"],
+    ["Alt + Click", "sc_altClickTag"],
+    ["Drag items → tag", "sc_dragItems"],
+    ["Drag tag → item", "sc_dragTag"],
+    ["1 – 9", "sc_numKeys"],
+    ["Ctrl + 1 – 5", "sc_ctrlNumKeys"],
+    ["C", "sc_copyKey"],
+    ["Ctrl / ⌘ + F", "sc_searchKey"],
+    ["Double-click", "sc_doubleClick"],
+  ];
+  const fragment = document.createDocumentFragment();
+  for (const [keys, labelKey] of rows) {
+    const kbd = document.createElement("kbd");
+    kbd.textContent = keys;
+    const desc = document.createElement("span");
+    desc.textContent = translate(labelKey);
+    fragment.append(kbd, desc);
+  }
+  list.replaceChildren(fragment);
+}
+
+function openShortcutsDialog(): void {
+  renderShortcutsDialogContent();
+  const dialog = element<HTMLDialogElement>("shortcuts-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeShortcutsDialog(): void {
+  const dialog = element<HTMLDialogElement>("shortcuts-dialog");
+  if (dialog.open) dialog.close();
+}
+
+/* ==========================================================================
+ * Saved Views & Native Zotero Saved Searches (<dialog>)
+ * ========================================================================== */
 
 function toggleFilters(): void {
   const bar = element("filters-bar");
@@ -2624,8 +4740,7 @@ function populateSavedFilterSelect(selectedID = ""): void {
 function updateSavedFilterButtons(): void {
   const selectedID = element<HTMLSelectElement>("saved-filter-select").value;
   const filtersReady = !element<HTMLButtonElement>("filters-toggle").disabled;
-  element<HTMLButtonElement>("saved-filter-save").disabled =
-    !filtersReady || (!currentScope && !libraryResultsMode);
+  element<HTMLButtonElement>("saved-filter-save").disabled = !filtersReady;
   element<HTMLButtonElement>("saved-filter-delete").disabled = !selectedID;
 }
 
@@ -2639,13 +4754,108 @@ function markSavedFilterDirty(): void {
   if (!applyingSavedFilter) clearSavedFilterSelection();
 }
 
+function openSaveQueryDialog(mode: SaveQueryMode): void {
+  saveQueryMode = mode;
+  const errorEl = element("save-query-error");
+  errorEl.hidden = true;
+
+  const select = element<HTMLSelectElement>("saved-filter-select");
+  const existing = librarySavedFilters().find((p) => p.id === select.value);
+  const input = element<HTMLInputElement>("save-query-name");
+
+  if (mode === "zoteroSearch") {
+    element("save-query-title").textContent = translate(
+      "saveZoteroSearchTitle",
+    );
+    element("save-query-label").textContent = translate("saveZoteroSearchName");
+    element("save-query-description").textContent = translate(
+      "saveZoteroSearchDescription",
+    );
+    input.value = currentQueryHeading();
+  } else {
+    element("save-query-title").textContent = translate("saveView");
+    element("save-query-label").textContent = translate("savedFilterName");
+    element("save-query-description").textContent = translate(
+      "saveViewDescription",
+    );
+    input.value = existing?.name || currentQueryHeading();
+  }
+
+  const dialog = element<HTMLDialogElement>("save-query-dialog");
+  if (!dialog.open) dialog.showModal();
+  window.setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 0);
+}
+
+function closeSaveQueryDialog(): void {
+  const dialog = element<HTMLDialogElement>("save-query-dialog");
+  if (dialog.open) dialog.close();
+}
+
+async function submitSaveQueryDialog(): Promise<void> {
+  if (!api) return;
+  const name = element<HTMLInputElement>("save-query-name").value.trim();
+  const errorEl = element("save-query-error");
+  if (!name) {
+    errorEl.textContent = translate("errorEmptySearchName");
+    errorEl.hidden = false;
+    return;
+  }
+  errorEl.hidden = true;
+
+  if (saveQueryMode === "zoteroSearch") {
+    try {
+      suppressNotificationsUntil = Date.now() + 2000;
+      const saved = await api.saveZoteroSearch(
+        currentLibraryID,
+        name,
+        buildUnifiedQuery(),
+      );
+      closeSaveQueryDialog();
+      savedSearches = await api.getSavedSearches(currentLibraryID);
+      activeSavedSearchID = saved.id;
+      activeCollectionID = null;
+      unfiledOnly = false;
+      populateScopeCollectionSelect();
+      showToast(translate("zoteroSearchSaved", { name: saved.name }));
+      await executeUnifiedQuery();
+    } catch (error) {
+      errorEl.textContent = friendlyError(error);
+      errorEl.hidden = false;
+    }
+    return;
+  }
+
+  const select = element<HTMLSelectElement>("saved-filter-select");
+  const presets = librarySavedFilters().slice();
+  const existing = presets.find((preset) => preset.id === select.value);
+  const id =
+    existing?.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const preset = currentFilterPreset(id, name);
+  const index = presets.findIndex((entry) => entry.id === id);
+  if (index >= 0) presets[index] = preset;
+  else presets.push(preset);
+
+  savedFilters = { ...savedFilters, [String(currentLibraryID)]: presets };
+  api.savePreferences({ savedFilters });
+  populateSavedFilterSelect(id);
+  closeSaveQueryDialog();
+  showToast(translate("savedFilterSaved", { name }));
+}
+
 function currentFilterPreset(id: string, name: string): SavedFilterPreset {
-  if (!currentScope && !libraryResultsMode)
-    throw new Error("SAVED_FILTER_SCOPE_UNAVAILABLE");
-  return {
+  const legacyScope = untaggedOnly
+    ? ({ kind: "untagged" } as const)
+    : includeTags.length === 1 && !excludeTags.length
+      ? ({ kind: "tag", tagName: includeTags[0] } as const)
+      : ({ kind: "library" } as const);
+
+  const preset: SavedFilterPreset = {
     id,
     name,
-    scope: currentScope || { kind: "library" },
+    scope: legacyScope,
     query: element<HTMLInputElement>("item-search").value.trim(),
     author: element<HTMLSelectElement>("author-filter").value,
     secondTag: element<HTMLSelectElement>("second-tag-filter").value,
@@ -2658,34 +4868,18 @@ function currentFilterPreset(id: string, name: string): SavedFilterPreset {
     hasPDF: element<HTMLInputElement>("filter-has-pdf").checked,
     hasNotes: element<HTMLInputElement>("filter-has-notes").checked,
   };
-}
 
-function saveCurrentFilter(): void {
-  if (!api || (!currentScope && !libraryResultsMode)) return;
-  const select = element<HTMLSelectElement>("saved-filter-select");
-  const presets = librarySavedFilters().slice();
-  const existing = presets.find((preset) => preset.id === select.value);
-  const proposed = window.prompt(
-    translate("savedFilterName"),
-    existing?.name ||
-      (currentScope
-        ? scopeLabel(currentScope)
-        : translate(
-            libraryResultsMode === "recent" ? "recentItems" : "allLibrary",
-          )),
-  );
-  const name = String(proposed || "").trim();
-  if (!name) return;
-  const id =
-    existing?.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const preset = currentFilterPreset(id, name);
-  const index = presets.findIndex((entry) => entry.id === id);
-  if (index >= 0) presets[index] = preset;
-  else presets.push(preset);
-  savedFilters = { ...savedFilters, [String(currentLibraryID)]: presets };
-  api.savePreferences({ savedFilters });
-  populateSavedFilterSelect(id);
-  showToast(translate("savedFilterSaved", { name }));
+  if (includeTags.length) preset.includeTags = [...includeTags];
+  if (excludeTags.length) preset.excludeTags = [...excludeTags];
+  if (activeCollectionID !== null) preset.collectionID = activeCollectionID;
+  if (unfiledOnly) preset.unfiledOnly = true;
+  if (!includeSubcollections) preset.includeSubcollections = false;
+  if (quickSearchMode !== "fields") preset.quickSearchMode = quickSearchMode;
+  if (joinMode !== "all") preset.joinMode = joinMode;
+  const activeConds = activeAdvancedConditions();
+  if (activeConds.length) preset.advancedConditions = activeConds;
+
+  return preset;
 }
 
 function deleteSavedFilter(): void {
@@ -2710,12 +4904,12 @@ async function applySavedFilter(presetID: string): Promise<void> {
   const preset = librarySavedFilters().find((entry) => entry.id === presetID);
   if (!preset || !overview) return;
   const availableTags = new Set(overview.tags.map((tag) => tag.name));
-  const missingTag =
-    preset.scope.kind === "tag" && !availableTags.has(preset.scope.tagName)
-      ? preset.scope.tagName
-      : preset.secondTag && !availableTags.has(preset.secondTag)
-        ? preset.secondTag
-        : "";
+  const checkTags = [
+    ...(preset.includeTags || []),
+    ...(preset.scope.kind === "tag" ? [preset.scope.tagName] : []),
+    ...(preset.secondTag ? [preset.secondTag] : []),
+  ];
+  const missingTag = checkTags.find((t) => !availableTags.has(t)) || "";
   if (missingTag) {
     showToast(translate("savedFilterMissingTag", { tag: missingTag }), true);
     return;
@@ -2723,15 +4917,32 @@ async function applySavedFilter(presetID: string): Promise<void> {
 
   applyingSavedFilter = true;
   try {
-    if (preset.scope.kind === "library") {
-      await enterLibrarySearch();
-      if (preset.query) {
-        element<HTMLInputElement>("item-search").value = preset.query;
-        await searchWholeLibrary(preset.query);
-      }
-    } else {
-      await selectScope(preset.scope);
-    }
+    untaggedOnly = preset.scope.kind === "untagged";
+    includeTags = preset.includeTags?.length
+      ? [...preset.includeTags]
+      : preset.scope.kind === "tag"
+        ? [preset.scope.tagName]
+        : [];
+    excludeTags = preset.excludeTags ? [...preset.excludeTags] : [];
+    activeCollectionID = preset.collectionID ?? null;
+    unfiledOnly = Boolean(preset.unfiledOnly);
+    activeSavedSearchID = null;
+    includeSubcollections = preset.includeSubcollections !== false;
+    quickSearchMode = preset.quickSearchMode || "fields";
+    joinMode = preset.joinMode || "all";
+    advancedConditions = preset.advancedConditions
+      ? preset.advancedConditions.map((c) => ({ ...c }))
+      : [];
+
+    element<HTMLSelectElement>("quicksearch-mode").value = quickSearchMode;
+    element<HTMLInputElement>("item-search").value = preset.query;
+    element("clear-item-search").hidden = !preset.query;
+    populateScopeCollectionSelect();
+    renderAdvancedConditionRows();
+    updateAdvancedConditionBadge();
+
+    await executeUnifiedQuery();
+
     const author = element<HTMLSelectElement>("author-filter");
     const secondTag = element<HTMLSelectElement>("second-tag-filter");
     if (
@@ -2739,16 +4950,18 @@ async function applySavedFilter(presetID: string): Promise<void> {
       !Array.from(author.options as unknown as HTMLOptionElement[]).some(
         (option) => option.value === preset.author,
       )
-    )
+    ) {
       author.appendChild(createOption(preset.author, preset.author));
+    }
     if (
       preset.secondTag &&
       !Array.from(secondTag.options as unknown as HTMLOptionElement[]).some(
         (option) => option.value === preset.secondTag,
       )
-    )
+    ) {
       secondTag.appendChild(createOption(preset.secondTag, preset.secondTag));
-    element<HTMLInputElement>("item-search").value = preset.query;
+    }
+
     author.value = preset.author;
     secondTag.value = preset.secondTag;
     element<HTMLInputElement>("year-min").value = preset.yearMin;
@@ -2760,6 +4973,7 @@ async function applySavedFilter(presetID: string): Promise<void> {
     element<HTMLInputElement>("date-modified-to").value = preset.dateModifiedTo;
     element<HTMLInputElement>("filter-has-pdf").checked = preset.hasPDF;
     element<HTMLInputElement>("filter-has-notes").checked = preset.hasNotes;
+
     const bar = element("filters-bar");
     bar.hidden = false;
     element("filters-toggle").setAttribute("aria-expanded", "true");
@@ -2771,8 +4985,7 @@ async function applySavedFilter(presetID: string): Promise<void> {
   }
 }
 
-function resetFilters(): void {
-  element<HTMLInputElement>("item-search").value = "";
+function resetClientFilters(): void {
   element<HTMLSelectElement>("author-filter").value = "";
   element<HTMLSelectElement>("second-tag-filter").value = "";
   element<HTMLInputElement>("year-min").value = "";
@@ -2786,16 +4999,14 @@ function resetFilters(): void {
   updateActiveFilterCount();
 }
 
-function clearFilters(): void {
+function clearClientFilters(): void {
   markSavedFilterDirty();
-  resetFilters();
-  if (currentScope) applyItemFilters();
-  else handleItemSearchInput();
+  resetClientFilters();
+  applyItemFilters();
 }
 
 function updateActiveFilterCount(): void {
   const values = [
-    element<HTMLInputElement>("item-search").value,
     element<HTMLSelectElement>("author-filter").value,
     element<HTMLSelectElement>("second-tag-filter").value,
     element<HTMLInputElement>("year-min").value,
@@ -2814,15 +5025,9 @@ function updateActiveFilterCount(): void {
   element<HTMLButtonElement>("clear-filters").disabled = count === 0;
 }
 
-function resetItemView(): void {
-  element("results-title").textContent = translate("allLibrary");
-  element("results-count").textContent = "0";
-  element("items-status").textContent = "";
-  setItemControlsEnabled(false);
-  showItemsEmpty("searchLibraryTitle", "searchLibraryBody");
-  itemVirtualList.setItems([]);
-  updateSelectionControls();
-}
+/* ==========================================================================
+ * Empty States, Refresh, Error Handling & Toast
+ * ========================================================================== */
 
 function showItemsEmpty(titleKey: string, bodyKey: string): void {
   const empty = element("items-empty");
@@ -2845,11 +5050,6 @@ function resetInspector(): void {
   element("inspector-empty").querySelector("p")!.textContent =
     translate("selectItem");
   element("inspector-content").hidden = true;
-}
-
-function setItemControlsEnabled(enabled: boolean): void {
-  element<HTMLInputElement>("item-search").disabled = !enabled;
-  setResultFilterControlsEnabled(enabled);
 }
 
 function setResultFilterControlsEnabled(enabled: boolean): void {
@@ -2875,13 +5075,6 @@ function setResultFilterControlsEnabled(enabled: boolean): void {
   updateSavedFilterButtons();
 }
 
-function setInspectorOpen(open: boolean, persist: boolean): void {
-  const app = element("app");
-  app.classList.toggle("inspector-closed", !open);
-  element("inspector-toggle").setAttribute("aria-pressed", String(open));
-  if (persist) api?.savePreferences({ inspectorOpen: open });
-}
-
 function isCurrentLibraryEditable(): boolean {
   return (
     bootstrap?.libraries.find((library) => library.id === currentLibraryID)
@@ -2899,27 +5092,23 @@ function setLoading(loading: boolean, messageKey = "loadingLibrary"): void {
 
 async function refreshCurrentView(): Promise<void> {
   if (!api || !currentLibraryID) return;
-  const savedScope = currentScope;
   const savedSelectedIDs = getSelectedItemIDs();
-  const savedQuery = element<HTMLInputElement>("item-search").value.trim();
   setLoading(true, "loadingLibrary");
   hideError();
   try {
     api.invalidate();
-    overview = await api.getTagOverview(currentLibraryID);
+    const [loadedOverview, loadedCollections, loadedSearches] =
+      await Promise.all([
+        api.getTagOverview(currentLibraryID),
+        api.getCollections(currentLibraryID),
+        api.getSavedSearches(currentLibraryID),
+      ]);
+    overview = loadedOverview;
+    collections = loadedCollections;
+    savedSearches = loadedSearches;
+    populateScopeCollectionSelect();
     updateTagRows();
-    if (savedScope) {
-      allItems = await api.getItems(currentLibraryID, savedScope);
-      currentScope = savedScope;
-      populateItemFilterOptions();
-      applyItemFilters();
-      await restoreItemSelection(savedSelectedIDs);
-    } else if (savedQuery) {
-      currentScope = null;
-      await searchWholeLibrary(savedQuery, savedSelectedIDs);
-    } else {
-      await loadRecentItems(savedSelectedIDs);
-    }
+    await executeUnifiedQuery({ preserveItemIDs: savedSelectedIDs });
   } catch (error) {
     showError(error, refreshCurrentView);
   } finally {
@@ -2964,6 +5153,10 @@ function friendlyError(error: unknown): string {
     ZETTLR_CONFIG_UNAVAILABLE: "errorZettlrConfig",
     MAIN_WINDOW_UNAVAILABLE: "errorCopy",
     EMPTY_TAG: "errorEmptyTag",
+    EMPTY_SEARCH_NAME: "errorEmptySearchName",
+    NO_SEARCH_CONDITIONS: "errorNoSearchConditions",
+    MAX_COLORED_TAGS_REACHED: "errorMaxColoredTags",
+    INVALID_TAG_COLOR: "errorInvalidColor",
     TAG_TOO_LONG: "errorLongTag",
     TAG_NOT_FOUND: "errorTagNotFound",
     TAG_ALREADY_EXISTS: "errorTagExists",

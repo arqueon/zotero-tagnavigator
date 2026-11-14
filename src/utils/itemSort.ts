@@ -23,6 +23,23 @@ export function compareItemSummaries(
     });
   } else if (sortKey === "year") {
     result = (left.year ?? -Infinity) - (right.year ?? -Infinity);
+  } else if (sortKey === "publication") {
+    result = (left.publicationTitle || "").localeCompare(
+      right.publicationTitle || "",
+      locale,
+      { sensitivity: "base" },
+    );
+  } else if (sortKey === "itemType") {
+    result = (left.itemTypeLabel || "").localeCompare(
+      right.itemTypeLabel || "",
+      locale,
+      { sensitivity: "base" },
+    );
+  } else if (sortKey === "citekey") {
+    result = (left.citekey || "").localeCompare(right.citekey || "", "en", {
+      sensitivity: "base",
+      numeric: true,
+    });
   } else {
     // Zotero exposes these timestamps in sortable SQL form
     // (YYYY-MM-DD HH:MM:SS), so string comparison preserves chronology.

@@ -23,6 +23,48 @@
       style="margin-top: 8px"
     />
 
+    <hbox align="center" style="margin-top: 12px; gap: 10px">
+      <html:label
+        for="zotero-prefpane-__addonRef__-double-click"
+        data-l10n-id="pref-double-click-label"
+      ></html:label>
+      <menulist
+        id="zotero-prefpane-__addonRef__-double-click"
+        preference="extensions.zotero.__addonRef__.doubleClickAction"
+      >
+        <menupopup>
+          <menuitem
+            value="openAttachment"
+            data-l10n-id="pref-double-click-open-attachment"
+          />
+          <menuitem
+            value="selectInZotero"
+            data-l10n-id="pref-double-click-select-zotero"
+          />
+          <menuitem value="none" data-l10n-id="pref-double-click-none" />
+        </menupopup>
+      </menulist>
+    </hbox>
+
+    <hbox align="center" style="margin-top: 10px; gap: 10px">
+      <html:label
+        for="zotero-prefpane-__addonRef__-density"
+        data-l10n-id="pref-density-label"
+      ></html:label>
+      <menulist
+        id="zotero-prefpane-__addonRef__-density"
+        preference="extensions.zotero.__addonRef__.density"
+      >
+        <menupopup>
+          <menuitem
+            value="comfortable"
+            data-l10n-id="pref-density-comfortable"
+          />
+          <menuitem value="compact" data-l10n-id="pref-density-compact" />
+        </menupopup>
+      </menulist>
+    </hbox>
+
     <html:p
       data-l10n-id="pref-launcher-endpoint"
       style="

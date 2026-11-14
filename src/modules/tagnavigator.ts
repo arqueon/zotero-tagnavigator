@@ -5,6 +5,7 @@ import type {
   ItemScope,
   NavigatorPreferences,
   TagNavigatorAPI,
+  UnifiedItemQuery,
 } from "../types/tagNavigator";
 
 export class TagNavigatorManager {
@@ -16,6 +17,17 @@ export class TagNavigatorManager {
     initialize: () => this.service.initialize(),
     getTagOverview: (libraryID: number) =>
       this.service.getTagOverview(libraryID),
+    getCollections: (libraryID: number) =>
+      this.service.getCollections(libraryID),
+    getSavedSearches: (libraryID: number) =>
+      this.service.getSavedSearches(libraryID),
+    queryItems: (libraryID: number, query: UnifiedItemQuery) =>
+      this.service.queryItems(libraryID, query),
+    saveZoteroSearch: (
+      libraryID: number,
+      name: string,
+      query: UnifiedItemQuery,
+    ) => this.service.saveZoteroSearch(libraryID, name, query),
     getItems: (libraryID: number, scope: ItemScope) =>
       this.service.getItems(libraryID, scope),
     getRecentItems: (libraryID: number) =>
@@ -31,6 +43,21 @@ export class TagNavigatorManager {
       this.service.addTags(itemIDs, tagName),
     removeTags: (itemIDs: number[], tagName: string) =>
       this.service.removeTags(itemIDs, tagName),
+    setTagColor: (
+      libraryID: number,
+      tagName: string,
+      color: string | null,
+      position?: number,
+    ) => this.service.setTagColor(libraryID, tagName, color, position),
+    toggleColoredTagByPosition: (
+      libraryID: number,
+      itemIDs: number[],
+      position: number,
+    ) => this.service.toggleColoredTagByPosition(libraryID, itemIDs, position),
+    convertAutomaticTagToManual: (libraryID: number, tagName: string) =>
+      this.service.convertAutomaticTagToManual(libraryID, tagName),
+    removeAutomaticTags: (libraryID: number) =>
+      this.service.removeAutomaticTags(libraryID),
     renameTag: (libraryID: number, sourceName: string, targetName: string) =>
       this.service.renameTag(libraryID, sourceName, targetName),
     mergeTags: (libraryID: number, sourceName: string, targetName: string) =>
@@ -47,6 +74,8 @@ export class TagNavigatorManager {
       this.service.selectInMainWindow(itemID),
     openBestAttachment: (itemID: number) =>
       this.service.openBestAttachment(itemID),
+    openAttachmentByID: (attachmentID: number) =>
+      this.service.openAttachmentByID(attachmentID),
     savePreferences: (preferences: Partial<NavigatorPreferences>) =>
       this.service.savePreferences(preferences),
     invalidate: () => this.service.invalidate(),
@@ -62,7 +91,16 @@ export class TagNavigatorManager {
             this.dispatchDataChanged();
           },
         },
-        ["item", "item-tag", "tag", "group"],
+        [
+          "item",
+          "item-tag",
+          "tag",
+          "group",
+          "collection",
+          "collection-item",
+          "search",
+          "setting",
+        ],
         config.addonID,
       );
     }
@@ -74,16 +112,23 @@ export class TagNavigatorManager {
       Zotero.Notifier.unregisterObserver(this.notifierID);
       this.notifierID = null;
     }
+    this.closeWindow();
+    this.service.invalidate();
+  }
+
+  closeWindow(): void {
     if (this.openedWindow && !this.openedWindow.closed) {
       this.openedWindow.close();
     }
     this.openedWindow = null;
-    this.service.invalidate();
   }
 
   /** Opens the floating navigator, or focuses the existing instance. */
   openWindow(): void {
     try {
+      if (!this.notifierID) {
+        this.start();
+      }
       if (this.openedWindow && !this.openedWindow.closed) {
         this.openedWindow.focus();
         return;
@@ -93,24 +138,26 @@ export class TagNavigatorManager {
         "@mozilla.org/embedcomp/window-watcher;1"
       ].getService(Components.interfaces.nsIWindowWatcher);
       const parentWindow = Zotero.getMainWindow() || null;
+      const targetURL = `chrome://${config.addonRef}/content/tagnavigator.html`;
 
-      this.openedWindow = windowWatcher.openWindow(
+      const win = windowWatcher.openWindow(
         parentWindow,
-        `chrome://${config.addonRef}/content/tagnavigator.html`,
-        "tagnavigator-window",
-        "chrome,dialog=no,titlebar,close,resizable,centerscreen,width=1280,height=800",
+        targetURL,
+        null,
+        "chrome,dialog=no,titlebar,close,resizable,centerscreen,width=1340,height=840",
         // nsIWindowWatcher only transports arbitrary JavaScript values when
         // they are explicitly exposed through wrappedJSObject.
         { wrappedJSObject: { api: this.api } },
-      );
+      ) as Window | null;
+      this.openedWindow = win;
 
-      this.openedWindow?.addEventListener(
-        "unload",
-        () => {
+      win?.addEventListener("unload", (event: Event) => {
+        const doc = event.target as Document | null;
+        if (doc?.location?.href === "about:blank") return;
+        if (this.openedWindow === win) {
           this.openedWindow = null;
-        },
-        { once: true },
-      );
+        }
+      });
     } catch (error) {
       Zotero.logError(error as Error);
     }
